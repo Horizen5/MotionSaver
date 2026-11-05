@@ -1,7 +1,9 @@
 package com.motionsaver.app
 
 import android.app.Application
+import com.motionsaver.app.data.HistoryStore
 import com.motionsaver.app.data.SaveMediaUseCase
+import com.motionsaver.app.data.SettingsStore
 import okhttp3.OkHttpClient
 import java.util.concurrent.TimeUnit
 
@@ -15,11 +17,14 @@ class MotionSaverApp : Application() {
         val http: OkHttpClient by lazy {
             OkHttpClient.Builder()
                 .connectTimeout(20, TimeUnit.SECONDS)
-                .readTimeout(60, TimeUnit.SECONDS)
+                .readTimeout(90, TimeUnit.SECONDS)
+                .writeTimeout(30, TimeUnit.SECONDS)
                 .followRedirects(true)
                 .followSslRedirects(true)
                 .build()
         }
+        val settings: SettingsStore by lazy { SettingsStore(app) }
+        val history: HistoryStore by lazy { HistoryStore(app) }
         val saveMedia: SaveMediaUseCase by lazy { SaveMediaUseCase(app, http) }
     }
 

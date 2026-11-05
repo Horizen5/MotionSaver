@@ -1,127 +1,63 @@
 package com.motionsaver.core
 
 /**
- * 抖音解析器（公开分享页路径）。
+ * 平台解析器。三者共用 [PublicPageParser.parsePublic] 的资源发现与归类逻辑，
+ * 各自只负责「识别自己的链接」和「标题兜底文案」，新增平台成本极低。
  *
  * 合规边界：只请求用户粘贴的公开分享链接，读取页面自身公开的元信息；
- * 不生成 a_bogus / msToken 等私有签名，不请求需要鉴权的内部接口。
- * 若页面未公开直链，会返回带 warning 的部分结果，由调用方决定是否提示用户。
+ * 不生成 a_bogus / x-s / msToken 等私有签名，不请求需要鉴权的内部接口。
  */
 class DouyinParser : PublicPageParser() {
-
     override val platform = Platform.DOUYIN
-
     override fun canHandle(shareText: String): Boolean =
         Platform.from(shareText) == Platform.DOUYIN
+    override fun parse(shareText: String, fetcher: HttpFetcher): ParsedMedia =
+        parsePublic(shareText, fetcher, Platform.DOUYIN, "抖音作品")
+}
 
-    override fun parse(shareText: String, fetcher: HttpFetcher): ParsedMedia {
-        val url = ShareText.extractUrl(shareText)
-            ?: ShareText.extractUrl(shareText.trim())
-            ?: throw ParseException("分享文本中未找到链接")
-        val page = fetchPublicPage(url, fetcher)
-        val html = page.text()
+class XiaohongshuParser : PublicPageParser() {
+    override val platform = Platform.XIAOHONGSHU
+    override fun canHandle(shareText: String): Boolean =
+        Platform.from(shareText) == Platform.XIAOHONGSHU
+    override fun parse(shareText: String, fetcher: HttpFetcher): ParsedMedia =
+        parsePublic(shareText, fetcher, Platform.XIAOHONGSHU, "小红书笔记")
+}
 
-        val title = extractTitle(html).ifBlank {
-            ShareText.extractTitleFallback(shareText).ifBlank { "抖音作品" }
-        }
-        val warnings = mutableListOf<String>()
-        val urls = extractMediaUrls(html)
-        val (liveCover, liveVideo) = extractLivePhoto(html)
-
-        // 页面声明了实况图封面 + 动态片段 → 走小米动态照片合成
-        if (liveCover != null && liveVideo != null) {
-            return ParsedMedia(
-                platform = Platform.DOUYIN,
-                type = MediaType.LIVE_PHOTO,
-                title = title,
-                itemId = extractItemId(page.finalUrl),
-                liveCover = MediaResource(liveCover, "image/jpeg"),
-                liveVideo = MediaResource(liveVideo, "video/mp4"),
-                warnings = warnings
-            )
-        }
-
-        val videoUrl = urls.firstOrNull { guessMime(it) == "video/mp4" }
-        val resources = urls.map { MediaResource(it, guessMime(it)) }
-        if (videoUrl == null) {
-            warnings.add("公开分享页未暴露视频直链，仅能保存封面图；如需原始视频请接入你自己的合规数据源。")
-        }
-
-        return ParsedMedia(
-            platform = Platform.DOUYIN,
-            type = if (videoUrl != null) MediaType.VIDEO else MediaType.IMAGES,
-            title = title,
-            itemId = extractItemId(page.finalUrl),
-            resources = resources,
-            warnings = warnings
-        )
-    }
-
-    private fun extractItemId(url: String): String =
-        Regex("""(?:video|note|modal_id|itemId)[/=](\d{6,})""").find(url)?.groupValues?.get(1)
-            ?: Regex("""/([a-zA-Z0-9]{8,})/?(?:[?#]|$)""").find(url)?.groupValues?.get(1)
-            ?: ""
+/** 兜底：任意 http(s) 网页都按公开元信息解析，做到「任何链接都能试」。 */
+class GenericParser : PublicPageParser() {
+    override val platform = Platform.GENERIC
+    override fun canHandle(shareText: String): Boolean =
+        ShareLinkNormalizer.urlOf(shareText) != null
+    override fun parse(shareText: String, fetcher: HttpFetcher): ParsedMedia =
+        parsePublic(shareText, fetcher, Platform.GENERIC, "网页作品")
 }
 
 /**
- * 小红书解析器（占位实现，第二优先级）。
- * 与抖音共用同一套公开页解析框架，后续补齐 Live 图字段映射即可。
+ * 解析器注册表。优先级：自填端点（若启用）→ 抖音 → 小红书 → 通用网页。
+ * 新增平台只需在 [defaultParsers] 里插入一个实现，下载链路完全不用改。
  */
-class XiaohongshuParser : PublicPageParser() {
-
-    override val platform = Platform.XIAOHONGSHU
-
-    override fun canHandle(shareText: String): Boolean =
-        Platform.from(shareText) == Platform.XIAOHONGSHU
-
-    override fun parse(shareText: String, fetcher: HttpFetcher): ParsedMedia {
-        val url = ShareText.extractUrl(shareText) ?: throw ParseException("分享文本中未找到链接")
-        val page = fetchPublicPage(url, fetcher)
-        val html = page.text()
-
-        val title = extractTitle(html).ifBlank {
-            ShareText.extractTitleFallback(shareText).ifBlank { "小红书笔记" }
-        }
-        val urls = extractMediaUrls(html)
-        val (liveCover, liveVideo) = extractLivePhoto(html)
-
-        if (liveCover != null && liveVideo != null) {
-            return ParsedMedia(
-                platform = Platform.XIAOHONGSHU,
-                type = MediaType.LIVE_PHOTO,
-                title = title,
-                liveCover = MediaResource(liveCover, "image/jpeg"),
-                liveVideo = MediaResource(liveVideo, "video/mp4")
-            )
-        }
-
-        val warnings = mutableListOf<String>()
-        if (urls.isEmpty()) warnings.add("公开页未暴露任何可下载资源，需接入你自己的合规数据源。")
-
-        return ParsedMedia(
-            platform = Platform.XIAOHONGSHU,
-            type = if (urls.any { guessMime(it) == "video/mp4" }) MediaType.VIDEO else MediaType.IMAGES,
-            title = title,
-            resources = urls.map { MediaResource(it, guessMime(it)) },
-            warnings = warnings
-        )
-    }
-}
-
-/** 解析器注册表：新增平台只需 register，无需改动下载链路。 */
 class ParserRegistry(parsers: List<MediaParser> = defaultParsers()) {
 
     private val list = parsers.toList()
 
     fun parse(shareText: String, fetcher: HttpFetcher): ParsedMedia {
         val parser = list.firstOrNull { it.canHandle(shareText) }
-            ?: throw ParseException("暂不支持该链接（当前支持：${supported()}）")
+            ?: throw ParseException("分享文本中未找到可解析的链接")
         return parser.parse(shareText, fetcher)
     }
 
     fun supported(): String = list.joinToString("、") { it.platform.label }
 
+    /** 只看第一个链接，用于解析前预览（不发起网络请求）。 */
+    fun previewPlatform(shareText: String): Platform =
+        list.firstOrNull { it.canHandle(shareText) }?.platform ?: Platform.UNKNOWN
+
     companion object {
-        fun defaultParsers(): List<MediaParser> = listOf(DouyinParser(), XiaohongshuParser())
+        fun defaultParsers(endpoint: EndpointSpec? = null): List<MediaParser> = buildList {
+            if (endpoint != null && endpoint.isValid()) add(EndpointParser(endpoint))
+            add(DouyinParser())
+            add(XiaohongshuParser())
+            add(GenericParser())
+        }
     }
 }

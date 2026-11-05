@@ -15,7 +15,6 @@ interface HttpFetcher {
         fun text(): String = body.toString(Charsets.UTF_8)
     }
 
-    /** @param range 可选 Range 头值，用于分片下载 */
     fun get(url: String, headers: Map<String, String> = emptyMap()): Response
 }
 
@@ -28,16 +27,26 @@ interface MediaParser {
 
 class ParseException(message: String, cause: Throwable? = null) : RuntimeException(message, cause)
 
-/** 从分享文案里抽出第一个 http(s) 链接，兼容抖音/小红书「口令 + 链接」混合文本。 */
+/** 从分享文案里抽出链接、清洗口令，兼容「口令 + 链接」混合文本。 */
 object ShareText {
     private val URL = Regex("""https?://[^\s"'<>\p{Cntrl}]+""")
 
-    fun extractUrl(text: String): String? =
-        URL.find(text)?.value?.trimEnd('，', '。', ',', '.', '；', ';', '、', ')', ']', '】')
+    private val TAIL_PUNCT = charArrayOf(
+        '，', '。', ',', '.', '；', ';', '、', ')', ']', '】', '》', '"', '\'', '!', '！', '?', '？'
+    )
 
+    private val NOISE = Regex(
+        """[0-9.]+复制打开抖音|复制此链接|打开[Dd]ouyin|打开小红书|看看|发布在小红书|长按复制|复制口令|去抖音|戳这里|↑|👇"""
+    )
+
+    fun extractUrl(text: String): String? =
+        URL.find(text)?.value?.trimEnd(*TAIL_PUNCT)
+
+    /** 去掉链接与口令噪音后剩下的文字，可作为标题兜底。 */
     fun extractTitleFallback(text: String): String =
         text.replace(URL, " ")
-            .replace(Regex("""[0-9.]+复制打开抖音|复制此链接|打开[Dd]ouyin|看看|发布在小红书|小红书"""), " ")
+            .replace(NOISE, " ")
+            .replace(Regex("""[\p{Cntrl}]+"""), " ")
             .replace(Regex("""\s+"""), " ")
             .trim()
             .take(120)

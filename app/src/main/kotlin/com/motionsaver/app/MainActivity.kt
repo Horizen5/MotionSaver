@@ -21,9 +21,13 @@ class MainActivity : ComponentActivity() {
         setContent {
             MotionSaverTheme {
                 val vm: MainViewModel = viewModel(
-                    factory = MainViewModel.Factory(app.container.saveMedia)
+                    factory = MainViewModel.Factory(
+                        app.container.saveMedia,
+                        app.container.settings,
+                        app.container.history,
+                        applicationContext
+                    )
                 )
-                // 从其它 App 分享进来的链接自动回填
                 androidx.compose.runtime.LaunchedEffect(sharedText) {
                     if (!sharedText.isNullOrBlank()) vm.onInputChange(sharedText)
                 }
