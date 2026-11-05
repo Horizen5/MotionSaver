@@ -160,7 +160,7 @@ private fun ResultCard(p: ParsedMedia, state: MainUiState, vm: MainViewModel) {
 
             if (groups.isEmpty() && !p.isLivePhoto) {
                 Text(
-                    "该页面未暴露可下载资源。可在设置里填入自己的解析端点。",
+                    "本次未拿到媒体地址：平台返回了未渲染的页面壳，已自动重试并切换渲染策略。可再点一次解析，或在设置里填入自己的解析端点。",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.error
                 )

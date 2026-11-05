@@ -12,5 +12,6 @@
 *.ap_
 *.aab
 *.keystore
+/verify_output/
 !samples/*.jpg
 !core/src/test/resources/*

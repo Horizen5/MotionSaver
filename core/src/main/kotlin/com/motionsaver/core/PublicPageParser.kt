@@ -16,16 +16,71 @@ package com.motionsaver.core
  */
 abstract class PublicPageParser : MediaParser {
 
+    companion object {
+        private const val MOBILE_UA =
+            "Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Mobile Safari/537.36"
+        private const val SEO_UA =
+            "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)"
+        /** 平台 SSR 是概率性返回（实测同一链接前 1~2 次可能是空壳），留足重试次数。 */
+        private const val SSR_ATTEMPTS = 5
+    }
+
     protected val fetchHeaders = mapOf(
-        "User-Agent" to "Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Mobile Safari/537.36",
+        "User-Agent" to MOBILE_UA,
         "Accept" to "text/html,application/xhtml+xml,application/json;q=0.9,*/*;q=0.8",
         "Accept-Language" to "zh-CN,zh;q=0.9"
     )
+
+    /**
+     * 搜索引擎爬虫 UA：平台为 SEO 收录会服务端渲染出完整 JSON-LD 结构化数据。
+     * 这是公开页面自身声明的内容，不涉及任何签名或鉴权。
+     */
+    private val seoHeaders = mapOf(
+        "User-Agent" to SEO_UA,
+        "Accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language" to "zh-CN,zh;q=0.9"
+    )
+
+    /** 下载媒体时带的通用请求头（CDN 直链对空 UA 可能拦截）。 */
+    private val mediaHeaders = mapOf("User-Agent" to MOBILE_UA)
 
     protected fun fetchPublicPage(url: String, fetcher: HttpFetcher): HttpFetcher.Response {
         val res = fetcher.get(url, fetchHeaders)
         if (res.code !in 200..299) throw ParseException("公开页返回 HTTP ${res.code}")
         return res
+    }
+
+    /**
+     * 多策略取页。第一次用常规 UA 跟随短链 302，拿到带分享参数的完整 URL；
+     * 后续直接用该 URL + 爬虫 UA 请求，命中 SSR 结构化数据即早停。
+     * 每次都记录「数据最全」的一次，全部落空时返回它并给出明确警告。
+     */
+    protected fun fetchForParsing(url: String, fetcher: HttpFetcher): Pair<HttpFetcher.Response, JsonLdMedia> {
+        var bestResponse: HttpFetcher.Response? = null
+        var bestLd = JsonLdMedia()
+        var bestScore = -1
+        var requestUrl = url
+
+        repeat(SSR_ATTEMPTS) { attempt ->
+            val headers = if (attempt == 0) fetchHeaders else seoHeaders
+            val res = runCatching { fetcher.get(requestUrl, headers) }.getOrNull() ?: return@repeat
+            if (res.code !in 200..299) return@repeat
+            // 复用重定向后的完整地址，避免每次重新走短链跳转、也保留分享签名参数
+            if (res.finalUrl.isNotBlank()) requestUrl = res.finalUrl
+
+            val html = res.text()
+            val ld = JsonLdParser.parse(html)
+            val score = ld.mediaCount * 1000 + discoverResources(html).size
+            if (score > bestScore) {
+                bestScore = score
+                bestResponse = res
+                bestLd = ld
+            }
+            if (ld.mediaCount > 0) return Pair(res, ld)
+        }
+
+        val fallback = bestResponse ?: fetchPublicPage(url, fetcher)
+        return fallback to bestLd
     }
 
     // ---------------------------------------------------------------- 标题 / 正文
@@ -223,6 +278,57 @@ abstract class PublicPageParser : MediaParser {
         return c?.url to v?.url
     }
 
+    // ---------------------------------------------------------------- 结构化数据 → 资源
+
+    /** JSON-LD 命中的资源优先：顺序由图集数组决定，比正则扫 HTML 更准确。 */
+    private fun buildLdResources(ld: JsonLdMedia): List<MediaResource> {
+        val out = mutableListOf<MediaResource>()
+        ld.imageUrls.forEachIndexed { i, u ->
+            val kind = MediaTypeDetector.kindOf(u)
+            out += MediaResource(
+                url = u,
+                mime = MediaTypeDetector.mimeOf(u, kind),
+                kind = kind,
+                label = if (kind == ResourceKind.ANIMATED) "动图 ${i + 1}" else "图 ${i + 1}",
+                index = i + 1,
+                headers = mediaHeaders
+            )
+        }
+        ld.thumbnailUrls.filter { u -> out.none { it.url == u } }.forEach { u ->
+            out += MediaResource(
+                url = u,
+                mime = MediaTypeDetector.mimeOf(u),
+                kind = ResourceKind.COVER,
+                label = "封面",
+                headers = mediaHeaders
+            )
+        }
+        ld.videoUrls.forEach { u ->
+            out += MediaResource(u, "video/mp4", ResourceKind.VIDEO, label = "视频", headers = mediaHeaders)
+        }
+        ld.audioUrls.forEach { u ->
+            out += MediaResource(
+                u,
+                MediaTypeDetector.mimeOf(u, ResourceKind.AUDIO),
+                ResourceKind.AUDIO,
+                label = "音频",
+                headers = mediaHeaders
+            )
+        }
+        return out
+    }
+
+    /** 合并两类来源后重新编号图集，保证「图 1 / 图 2 …」连续且与展示顺序一致。 */
+    private fun renumberImages(list: List<MediaResource>): List<MediaResource> {
+        var i = 0
+        return list.map { r ->
+            if (r.kind == ResourceKind.IMAGE || r.kind == ResourceKind.ANIMATED) {
+                i++
+                r.copy(index = i, label = if (r.kind == ResourceKind.ANIMATED) "动图 $i" else "图 $i")
+            } else r
+        }
+    }
+
     // ---------------------------------------------------------------- 统一编排
 
     protected fun parsePublic(
@@ -233,26 +339,41 @@ abstract class PublicPageParser : MediaParser {
     ): ParsedMedia {
         val url = ShareLinkNormalizer.urlOf(shareText)
             ?: throw ParseException("分享文本中未找到链接")
-        val page = fetchPublicPage(ShareLinkNormalizer.normalize(url), fetcher)
+        val (page, ld) = fetchForParsing(ShareLinkNormalizer.normalize(url), fetcher)
         val html = page.text()
 
-        val title = extractTitle(html).ifBlank {
+        // 结构化数据的标题/作者/正文最干净，优先于 meta 与口令兜底
+        val title = ld.title.ifBlank { extractTitle(html) }.ifBlank {
             ShareText.extractTitleFallback(shareText).ifBlank { defaultTitle }
         }
-        val resources = discoverResources(html)
+        val author = ld.author.ifBlank { extractAuthor(html) }
+        val caption = ld.description.ifBlank { extractCaption(html) }
+
+        // 图集以 JSON-LD 为准，再补页面里其它未重复的媒体链接
+        val merged = buildLdResources(ld).toMutableList()
+        discoverResources(html).forEach { b ->
+            if (merged.none { it.url == b.url }) merged.add(b)
+        }
+        val resources = renumberImages(merged)
         val (liveCover, liveVideo) = detectLive(html, resources)
 
         val warnings = mutableListOf<String>()
         if (resources.isEmpty() && liveCover == null) {
-            warnings.add("该公开页没有暴露可下载的媒体地址（平台通常只对登录后请求返回直链）。")
-            warnings.add("可在「设置 → 解析端点」填入你自己的合规数据源，即可拿到图文/视频/音频/动图完整资源。")
-        } else if (resources.none { it.kind == ResourceKind.VIDEO } && liveVideo == null) {
-            warnings.add("公开页未暴露视频直链，本次可保存图文/封面。视频直链需在设置里接入自填端点。")
+            warnings.add("该公开页没有暴露可下载的媒体地址（平台返回了未渲染的页面壳）。")
+            warnings.add("已自动重试 $SSR_ATTEMPTS 次并切换渲染策略；仍失败时可在「设置 → 解析端点」填入你自己的合规数据源。")
         }
 
         val notes = mutableListOf<String>()
         notes.add("数据源：公开分享页 ${page.finalUrl.take(120)}")
+        if (ld.mediaCount > 0) {
+            notes.add(
+                "命中 JSON-LD 结构化数据：图 ${ld.imageUrls.size} / 视频 ${ld.videoUrls.size} / 音频 ${ld.audioUrls.size}"
+            )
+        }
         notes.add("发现资源 ${resources.size} 个（图 ${resources.count { it.isImage }} / 视频 ${resources.count { it.isVideo }} / 音频 ${resources.count { it.isAudio }}）")
+        if (resources.isNotEmpty() && resources.none { it.isVideo }) {
+            notes.add("本次为图文作品，页面未声明视频直链。")
+        }
         if (liveCover != null && liveVideo != null) notes.add("检测到实况图：将合成小米动态照片")
 
         val type = if (liveCover != null && liveVideo != null) MediaType.LIVE_PHOTO else MediaType.MIXED
@@ -260,8 +381,8 @@ abstract class PublicPageParser : MediaParser {
             platform = platform,
             type = type,
             title = title,
-            author = extractAuthor(html),
-            caption = extractCaption(html),
+            author = author,
+            caption = caption,
             itemId = ShareLinkNormalizer.itemIdOf(page.finalUrl).ifEmpty { ShareLinkNormalizer.itemIdOf(url) },
             sourceUrl = url,
             resources = resources,
