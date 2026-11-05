@@ -5,10 +5,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.motionsaver.app.data.*
-import com.motionsaver.core.MediaResource
-import com.motionsaver.core.MotionPhotoVerifier
-import com.motionsaver.core.MotionPhotoWriter
-import com.motionsaver.core.ParsedMedia
+import com.motionsaver.core.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -29,8 +26,11 @@ data class MainUiState(
     val input: String = "",
     val isAnalyzing: Boolean = false,
     val isDownloading: Boolean = false,
-    val parsed: ParsedMedia? = null,
+    /** 一次可解析多条链接，每个作品一张结果卡 */
+    val results: List<ParsedMedia> = emptyList(),
     val selectedIds: Set<String> = emptySet(),
+    /** 本次下载是否提取音频（解析结果页可直接切换） */
+    val extractAudio: Boolean = false,
     val queue: List<QueueItem> = emptyList(),
     val history: List<HistoryEntry> = emptyList(),
     val settings: AppSettings = AppSettings(),
@@ -49,7 +49,7 @@ class MainViewModel(
     private val _ui = MutableStateFlow(MainUiState())
     val ui: StateFlow<MainUiState> = _ui.asStateFlow()
 
-    val supportedPlatforms = "抖音、小红书、通用网页" + "（可自填解析端点）"
+    val supportedPlatforms = "抖音、小红书、通用网页（可自填解析端点）"
 
     init {
         _ui.value = MainUiState(settings = settingsStore.load(), history = historyStore.load())
@@ -59,7 +59,7 @@ class MainViewModel(
         _ui.update { it.copy(input = v, message = "", isError = false) }
     }
 
-    /** 第一步：只解析，把四类资源展示出来供勾选，不下载。 */
+    /** 第一步：解析全部粘贴的链接，把四类资源展示出来供勾选，不下载。 */
     fun analyze() {
         val text = _ui.value.input.trim()
         if (text.isEmpty()) {
@@ -72,25 +72,27 @@ class MainViewModel(
             _ui.update {
                 it.copy(
                     isAnalyzing = true, message = "", isError = false,
-                    parsed = null, selectedIds = emptySet(), queue = emptyList()
+                    results = emptyList(), selectedIds = emptySet(), queue = emptyList()
                 )
             }
             val settings = _ui.value.settings
-            val outcome = withContext(Dispatchers.IO) { useCase.analyze(text, settings) }
+            val outcome = withContext(Dispatchers.IO) { useCase.analyzeAll(text, settings) }
             when (outcome) {
-                is SaveMediaUseCase.ParseOutcome.Ok -> {
-                    val p = outcome.media
+                is SaveMediaUseCase.ParseAllOutcome.Ok -> {
+                    val items = outcome.items
+                    val allIds = items.flatMap { p -> p.resources.map { r -> r.url } }.toSet()
+                    val warns = items.flatMap { it.warnings }
                     _ui.update {
                         it.copy(
                             isAnalyzing = false,
-                            parsed = p,
-                            selectedIds = p.resources.map { r -> r.url }.toSet(),
-                            message = buildAnalyzeMessage(p),
-                            isError = p.warnings.isNotEmpty()
+                            results = items,
+                            selectedIds = allIds,
+                            message = buildAnalyzeMessage(items, warns),
+                            isError = warns.isNotEmpty()
                         )
                     }
                 }
-                is SaveMediaUseCase.ParseOutcome.Err -> {
+                is SaveMediaUseCase.ParseAllOutcome.Err -> {
                     _ui.update {
                         it.copy(isAnalyzing = false, message = "解析失败：${outcome.reason}", isError = true)
                     }
@@ -99,13 +101,15 @@ class MainViewModel(
         }
     }
 
-    private fun buildAnalyzeMessage(p: ParsedMedia): String = buildString {
-        appendLine("【${p.type.label}】${p.title}")
-        if (p.author.isNotBlank()) appendLine("作者：${p.author}")
-        appendLine("图文 ${p.byKind(com.motionsaver.core.ResourceKind.IMAGE).size} · 视频 ${p.videos.size} · 音频 ${p.audios.size} · 动图 ${p.byKind(com.motionsaver.core.ResourceKind.ANIMATED).size}")
-        if (p.isLivePhoto) appendLine("检测到实况图：可合成小米动态照片")
-        p.notes.forEach { appendLine("· $it") }
-        p.warnings.forEach { appendLine("⚠ $it") }
+    private fun buildAnalyzeMessage(items: List<ParsedMedia>, warns: List<String>): String = buildString {
+        appendLine("共解析 ${items.size} 个作品")
+        items.forEachIndexed { i, p ->
+            appendLine("${i + 1}. 【${p.type.label}】${p.title}")
+            appendLine("   图文 ${p.byKind(ResourceKind.IMAGE).size} · 视频 ${p.videos.size} · " +
+                "音频 ${p.audios.size} · 动图 ${p.byKind(ResourceKind.ANIMATED).size}")
+            p.notes.take(2).forEach { appendLine("   · $it") }
+        }
+        warns.forEach { appendLine("⚠ $it") }
     }.trim()
 
     fun toggle(id: String) {
@@ -116,64 +120,102 @@ class MainViewModel(
         }
     }
 
+    /** 单个作品的全选 / 取消全选（结果卡右上角的方框）。 */
+    fun toggleAllIn(index: Int) {
+        val p = _ui.value.results.getOrNull(index) ?: return
+        val ids = p.resources.map { it.url }.toSet()
+        _ui.update {
+            val next = it.selectedIds.toMutableSet()
+            if (ids.all { id -> id in next }) next.removeAll(ids) else next.addAll(ids)
+            it.copy(selectedIds = next)
+        }
+    }
+
     fun selectAll() {
-        _ui.update { it.copy(selectedIds = it.parsed?.resources?.map { r -> r.url }?.toSet() ?: emptySet()) }
+        _ui.update {
+            it.copy(selectedIds = it.results.flatMap { p -> p.resources.map { r -> r.url } }.toSet())
+        }
     }
 
     fun selectNone() {
         _ui.update { it.copy(selectedIds = emptySet()) }
     }
 
-    /** 第二步：下载勾选项，队列实时刷新，完成后写入历史。 */
+    fun setExtractAudio(v: Boolean) {
+        _ui.update { it.copy(extractAudio = v) }
+    }
+
+    /** 第二步：逐个作品下载勾选项，队列实时刷新，完成后写入历史。 */
     fun downloadSelected() {
-        val p = _ui.value.parsed ?: return
-        if (_ui.value.isDownloading) return
-        val chosen = p.resources.filter { it.url in _ui.value.selectedIds }
+        val state = _ui.value
+        if (state.isDownloading || state.results.isEmpty()) return
+        val pairs = state.results.map { p ->
+            p to p.resources.filter { r -> r.url in state.selectedIds }
+        }.filter { (p, chosen) ->
+            chosen.isNotEmpty() || p.isLivePhoto || p.caption.isNotBlank()
+        }
+        if (pairs.isEmpty()) {
+            _ui.update { it.copy(message = "请先勾选要下载的资源", isError = true) }
+            return
+        }
 
         viewModelScope.launch {
             val existing = withContext(Dispatchers.IO) {
-                historyStore.load().map { it.fileName }.toSet()
+                historyStore.load().map { it.fileName }.toMutableSet()
             }
             _ui.update {
                 it.copy(isDownloading = true, queue = emptyList(), message = "", isError = false)
             }
-            val outcome = useCase.download(
-                p, chosen, _ui.value.settings, existing
-            ) { ev ->
-                _ui.update { s ->
-                    val item = QueueItem(ev.id, ev.label, ev.phase, ev.fraction, ev.detail)
-                    val list = s.queue.toMutableList()
-                    val idx = list.indexOfFirst { it.id == ev.id }
-                    if (idx >= 0) list[idx] = item else list.add(item)
-                    s.copy(queue = list)
+            val effective = state.settings.copy(extractAudioFromVideo = state.extractAudio)
+            val allSaved = mutableListOf<SaveMediaUseCase.SavedFile>()
+            val allWarnings = mutableListOf<String>()
+
+            pairs.forEachIndexed { group, (p, chosen) ->
+                val outcome = useCase.download(p, chosen, effective, existing) { ev ->
+                    val eid = "g${group}_${ev.id}"
+                    _ui.update { s ->
+                        val item = QueueItem(eid, ev.label, ev.phase, ev.fraction, ev.detail)
+                        val list = s.queue.toMutableList()
+                        val idx = list.indexOfFirst { it.id == eid }
+                        if (idx >= 0) list[idx] = item else list.add(item)
+                        s.copy(queue = list)
+                    }
+                }
+                when (outcome) {
+                    is SaveMediaUseCase.DownloadOutcome.Ok -> {
+                        allSaved += outcome.files
+                        allWarnings += outcome.warnings
+                        existing.addAll(outcome.files.map { it.name })
+                    }
+                    is SaveMediaUseCase.DownloadOutcome.Err -> allWarnings += outcome.reason
                 }
             }
-            when (outcome) {
-                is SaveMediaUseCase.DownloadOutcome.Ok -> {
-                    val entries = outcome.files.map {
-                        HistoryEntry(it.name, it.location, "${it.category} · ${it.bytes} 字节")
-                    }
-                    withContext(Dispatchers.IO) { historyStore.add(entries) }
-                    val msg = buildString {
-                        appendLine("已保存 ${entries.size} 个文件")
-                        outcome.files.take(8).forEach { appendLine("· ${it.name} → ${it.location}") }
-                        if (outcome.files.size > 8) appendLine("… 其余 ${outcome.files.size - 8} 个")
-                        outcome.warnings.forEach { appendLine("⚠ $it") }
-                    }.trim()
-                    _ui.update {
-                        it.copy(
-                            isDownloading = false,
-                            history = historyStore.load(),
-                            message = msg,
-                            isError = outcome.warnings.isNotEmpty()
-                        )
-                    }
-                }
-                is SaveMediaUseCase.DownloadOutcome.Err -> {
-                    _ui.update {
-                        it.copy(isDownloading = false, message = outcome.reason, isError = true)
-                    }
-                }
+
+            val entries = allSaved.map {
+                HistoryEntry(
+                    fileName = it.name,
+                    savedTo = it.location,
+                    detail = "${it.category} · ${it.bytes} 字节",
+                    previewUri = it.previewUri,
+                    mime = it.mime
+                )
+            }
+            if (entries.isNotEmpty()) {
+                withContext(Dispatchers.IO) { historyStore.add(entries) }
+            }
+            val msg = buildString {
+                appendLine("已保存 ${entries.size} 个文件")
+                entries.take(8).forEach { appendLine("· ${it.fileName} → ${it.savedTo}") }
+                if (entries.size > 8) appendLine("… 其余 ${entries.size - 8} 个")
+                allWarnings.forEach { appendLine("⚠ $it") }
+            }.trim()
+            _ui.update {
+                it.copy(
+                    isDownloading = false,
+                    history = historyStore.load(),
+                    message = msg,
+                    isError = allWarnings.isNotEmpty()
+                )
             }
         }
     }
@@ -187,8 +229,21 @@ class MainViewModel(
         _ui.update { it.copy(message = "", isError = false) }
     }
 
-    fun clearParsed() {
-        _ui.update { it.copy(parsed = null, selectedIds = emptySet(), queue = emptyList()) }
+    /** 清空解析结果，保留输入框内容。 */
+    fun clearResults() {
+        _ui.update {
+            it.copy(results = emptyList(), selectedIds = emptySet(), queue = emptyList(), message = "")
+        }
+    }
+
+    /** 一键清空输入框 + 结果，方便粘贴下一批链接。 */
+    fun clearAll() {
+        _ui.update {
+            it.copy(
+                input = "", results = emptyList(), selectedIds = emptySet(),
+                queue = emptyList(), message = "", isError = false
+            )
+        }
     }
 
     fun clearHistory() {

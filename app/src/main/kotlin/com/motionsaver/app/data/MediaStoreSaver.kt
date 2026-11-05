@@ -60,6 +60,24 @@ class MediaStoreSaver(private val context: Context) {
         return "$relPath/$name"
     }
 
+    /** 按文件名找回媒体库 content Uri，供「下载记录」直接点开预览。 */
+    fun savedUri(displayName: String, category: SaveCategory): Uri? {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return null
+        val (collection, _) = targetOf(category)
+        context.contentResolver.query(
+            collection,
+            arrayOf(MediaStore.MediaColumns._ID),
+            "${MediaStore.MediaColumns.DISPLAY_NAME} = ?",
+            arrayOf(displayName), null
+        )?.use { c ->
+            if (c.moveToFirst()) {
+                val id = c.getLong(c.getColumnIndexOrThrow(MediaStore.MediaColumns._ID))
+                return android.content.ContentUris.withAppendedId(collection, id)
+            }
+        }
+        return null
+    }
+
     private fun findExisting(collection: Uri, name: String): Uri? {
         context.contentResolver.query(
             collection,

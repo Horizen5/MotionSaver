@@ -16,6 +16,10 @@ interface HttpFetcher {
     }
 
     fun get(url: String, headers: Map<String, String> = emptyMap()): Response
+
+    /** 注册公开访客标识等需要 POST 的场景；默认实现让纯 JVM 测试无需覆盖。 */
+    fun post(url: String, body: String, headers: Map<String, String> = emptyMap()): Response =
+        Response(405, url, "", ByteArray(0))
 }
 
 /** 可插拔解析器契约。新增平台 = 新增一个实现并注册，无需改动其它代码。 */
@@ -41,6 +45,15 @@ object ShareText {
 
     fun extractUrl(text: String): String? =
         URL.find(text)?.value?.trimEnd(*TAIL_PUNCT)
+
+    /** 一次粘贴多条分享口令时，按出现顺序抽出全部链接并去重。 */
+    fun extractUrls(text: String, limit: Int = 10): List<String> =
+        URL.findAll(text)
+            .map { it.value.trimEnd(*TAIL_PUNCT) }
+            .filter { it.startsWith("http") }
+            .distinct()
+            .take(limit)
+            .toList()
 
     /** 去掉链接与口令噪音后剩下的文字，可作为标题兜底。 */
     fun extractTitleFallback(text: String): String =

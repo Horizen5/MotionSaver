@@ -21,8 +21,24 @@ abstract class PublicPageParser : MediaParser {
             "Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Mobile Safari/537.36"
         private const val SEO_UA =
             "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)"
-        /** 平台 SSR 是概率性返回（实测同一链接前 1~2 次可能是空壳），留足重试次数。 */
-        private const val SSR_ATTEMPTS = 5
+        /** 公开访客标识注册端点：只需一个访客 Cookie，不需要账号 / 登录 / 私有签名。 */
+        private const val TTWID_URL = "https://ttwid.bytedance.com/ttwid/union/register/"
+        private const val TTWID_BODY =
+            """{"region":"cn","aid":1768,"needFid":false,"service":"www.douyin.com","migrate_info":{"ticket":"","source":"node"},"cbUrlProtocol":"https","union":true}"""
+        private const val TTWID_TTL = 5 * 60 * 60 * 1000L
+
+        @Volatile private var cachedTtwid: String = ""
+        @Volatile private var cachedAt: Long = 0L
+    }
+
+    /** 一次取页的结果快照，用于在多种策略里挑数据最全的一次。 */
+    private data class PageSnapshot(
+        val response: HttpFetcher.Response,
+        val jsonLd: JsonLdMedia = JsonLdMedia(),
+        val router: ParsedMedia? = null
+    ) {
+        val score: Int
+            get() = (router?.resources?.size ?: 0) * 10_000 + jsonLd.mediaCount * 1_000
     }
 
     protected val fetchHeaders = mapOf(
@@ -50,37 +66,73 @@ abstract class PublicPageParser : MediaParser {
         return res
     }
 
-    /**
-     * 多策略取页。第一次用常规 UA 跟随短链 302，拿到带分享参数的完整 URL；
-     * 后续直接用该 URL + 爬虫 UA 请求，命中 SSR 结构化数据即早停。
-     * 每次都记录「数据最全」的一次，全部落空时返回它并给出明确警告。
-     */
-    protected fun fetchForParsing(url: String, fetcher: HttpFetcher): Pair<HttpFetcher.Response, JsonLdMedia> {
-        var bestResponse: HttpFetcher.Response? = null
-        var bestLd = JsonLdMedia()
-        var bestScore = -1
-        var requestUrl = url
+    /** 注册并缓存公开访客标识（约 5 小时有效），失败返回空串让上层回退。 */
+    private fun ensureVisitorToken(fetcher: HttpFetcher): String {
+        val now = System.currentTimeMillis()
+        if (cachedTtwid.isNotBlank() && now - cachedAt < TTWID_TTL) return cachedTtwid
+        val res = runCatching {
+            fetcher.post(
+                TTWID_URL, TTWID_BODY,
+                mapOf("Content-Type" to "application/json", "User-Agent" to MOBILE_UA)
+            )
+        }.getOrNull() ?: return ""
+        val cookies = res.headers.entries
+            .firstOrNull { it.key.equals("Set-Cookie", ignoreCase = true) }?.value.orEmpty()
+        val t = Regex("""ttwid=([^;,\s|]+)""").find(cookies)?.groupValues?.get(1).orEmpty()
+        if (t.isNotBlank()) {
+            cachedTtwid = t
+            cachedAt = now
+        }
+        return t
+    }
 
-        repeat(SSR_ATTEMPTS) { attempt ->
-            val headers = if (attempt == 0) fetchHeaders else seoHeaders
-            val res = runCatching { fetcher.get(requestUrl, headers) }.getOrNull() ?: return@repeat
-            if (res.code !in 200..299) return@repeat
-            // 复用重定向后的完整地址，避免每次重新走短链跳转、也保留分享签名参数
+    /**
+     * 多策略取页，优先级：
+     *   1. 公开访客 Cookie + 普通手机 UA → `videoInfoRes` 完整四类数据（画质最好、字段最准）
+     *   2. 搜索引擎爬虫 UA → JSON-LD 结构化数据（图集）
+     *   3. 普通 UA → og:* / 内嵌 JSON 兜底
+     * 平台 SSR 是概率性返回，每种策略都留重试；命中完整数据即早停。
+     */
+    private fun fetchForParsing(
+        url: String,
+        fetcher: HttpFetcher,
+        platform: Platform,
+        defaultTitle: String
+    ): PageSnapshot {
+        val visitor = if (url.contains("douyin", ignoreCase = true) || platform == Platform.DOUYIN) {
+            ensureVisitorToken(fetcher)
+        } else ""
+        var requestUrl = url
+        var best: PageSnapshot? = null
+
+        val strategies = buildList<Pair<Map<String, String>, String>> {
+            if (visitor.isNotBlank()) {
+                val h = fetchHeaders + mapOf(
+                    "Cookie" to "ttwid=$visitor",
+                    "Referer" to "https://www.douyin.com/"
+                )
+                repeat(3) { add(h to "访客") }
+            }
+            repeat(2) { add(seoHeaders to "爬虫") }
+            add(fetchHeaders to "常规")
+        }
+
+        for ((headers, _) in strategies) {
+            val res = runCatching { fetcher.get(requestUrl, headers) }.getOrNull() ?: continue
+            if (res.code !in 200..299) continue
+            // 复用重定向后的完整地址，保留分享参数，避免反复走短链
             if (res.finalUrl.isNotBlank()) requestUrl = res.finalUrl
 
             val html = res.text()
-            val ld = JsonLdParser.parse(html)
-            val score = ld.mediaCount * 1000 + discoverResources(html).size
-            if (score > bestScore) {
-                bestScore = score
-                bestResponse = res
-                bestLd = ld
-            }
-            if (ld.mediaCount > 0) return Pair(res, ld)
+            val snap = PageSnapshot(
+                response = res,
+                jsonLd = JsonLdParser.parse(html),
+                router = RouterDataParser.parse(html, platform, url, defaultTitle)
+            )
+            if (best == null || snap.score > best!!.score) best = snap
+            if (snap.router != null) return snap
         }
-
-        val fallback = bestResponse ?: fetchPublicPage(url, fetcher)
-        return fallback to bestLd
+        return best ?: PageSnapshot(fetchPublicPage(url, fetcher))
     }
 
     // ---------------------------------------------------------------- 标题 / 正文
@@ -159,6 +211,22 @@ abstract class PublicPageParser : MediaParser {
     private val BLACKLIST =
         Regex("""logo|icon|avatar|placeholder|blank|favicon|sprite|emoji|badge|qrcode|loading|default_cover|\.css|\.js|\.ico|\.svg|\.woff""", RegexOption.IGNORE_CASE)
 
+    /**
+     * 作品页 / 用户页 / 短链跳转链接。SSR 页面里会塞几十条「相关推荐」，
+     * 形如 https://www.douyin.com/video/7703… —— 它们是 HTML 页面而不是媒体文件，
+     * 旧版因 MEDIA_PATH 里的 /video/ 把它们判成视频，下载后表现为 0 秒 / 文件损坏。
+     */
+    private val PAGE_LINK = Regex(
+        """(?:www\.|m\.)?(?:douyin|iesdouyin|xiaohongshu|xhslink)\.com/(?:video|note|user|share|explore|discovery|slides|web|profile)/""",
+        RegexOption.IGNORE_CASE
+    )
+
+    /** 真正的媒体 CDN 域名；没有扩展名时只有这些域名才允许收录。 */
+    private val MEDIA_HOST = Regex(
+        """douyinpic\.com|douyinstatic\.com|bytecdntp\.com|byteimg\.com|ixigua|pstatp|xhscdn|snssdk|bytetos|tos-cn""",
+        RegexOption.IGNORE_CASE
+    )
+
     /** 把 HTML 里的实体与 JSON 反斜杠转义还原，方便统一用正则提取。 */
     private fun preprocess(html: String): String = decodeEntities(html)
         .replace("\\u002F", "/")
@@ -200,11 +268,12 @@ abstract class PublicPageParser : MediaParser {
             ) urls.add(u)
         }
 
-        // 4) 过滤噪音 + 按 URL 特征归类
+        // 4) 过滤噪音：必须有媒体扩展名、或来自媒体 CDN；作品页跳转链接一律排除
         val filtered = urls.filter { u ->
-            MediaTypeDetector.isHttp(u) &&
-                (MEDIA_EXT.containsMatchIn(u) || MEDIA_PATH.containsMatchIn(u) || u.contains("cdn", true)) &&
-                !BLACKLIST.containsMatchIn(u)
+            if (!MediaTypeDetector.isHttp(u)) return@filter false
+            if (BLACKLIST.containsMatchIn(u)) return@filter false
+            if (PAGE_LINK.containsMatchIn(u)) return@filter false
+            MEDIA_EXT.containsMatchIn(u) || MEDIA_HOST.containsMatchIn(u) || u.contains("cdn", true)
         }
 
         var imageIndex = 0
@@ -339,7 +408,19 @@ abstract class PublicPageParser : MediaParser {
     ): ParsedMedia {
         val url = ShareLinkNormalizer.urlOf(shareText)
             ?: throw ParseException("分享文本中未找到链接")
-        val (page, ld) = fetchForParsing(ShareLinkNormalizer.normalize(url), fetcher)
+        val snap = fetchForParsing(
+            ShareLinkNormalizer.normalize(url), fetcher, platform, defaultTitle
+        )
+        // 访客渲染数据已按明确字段给出四类资源，直接采用：
+        // 不再走全文链接扫描，从根上避免把「相关推荐」作品页误判成可下载视频
+        snap.router?.let { router ->
+            return router.copy(
+                sourceUrl = url,
+                notes = router.notes + "按字段精确提取，不含作品页跳转链接"
+            )
+        }
+        val page = snap.response
+        val ld = snap.jsonLd
         val html = page.text()
 
         // 结构化数据的标题/作者/正文最干净，优先于 meta 与口令兜底
@@ -360,7 +441,7 @@ abstract class PublicPageParser : MediaParser {
         val warnings = mutableListOf<String>()
         if (resources.isEmpty() && liveCover == null) {
             warnings.add("该公开页没有暴露可下载的媒体地址（平台返回了未渲染的页面壳）。")
-            warnings.add("已自动重试 $SSR_ATTEMPTS 次并切换渲染策略；仍失败时可在「设置 → 解析端点」填入你自己的合规数据源。")
+            warnings.add("已自动切换多种公开取页策略并重试；仍失败时可在「设置 → 高级设置 → 解析端点」填入你自己的合规数据源。")
         }
 
         val notes = mutableListOf<String>()

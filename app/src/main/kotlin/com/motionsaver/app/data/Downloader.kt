@@ -18,6 +18,30 @@ class Downloader(private val client: OkHttpClient) {
         val fraction: Float get() = if (total > 0) (downloaded.toFloat() / total).coerceIn(0f, 1f) else -1f
     }
 
+    /**
+     * 多候选直链下载：平台为同一资源给出多个 CDN / 格式候选，
+     * 首选失败（签名过期、节点异常）时自动依次回退，清掉半成品避免续传拼接错误内容。
+     */
+    suspend fun download(
+        urls: List<String>,
+        headers: Map<String, String>,
+        dest: File,
+        label: String = "",
+        retries: Int = 2,
+        onProgress: (Progress) -> Unit = {}
+    ): File {
+        var last: Exception? = null
+        for (u in urls.distinct()) {
+            try {
+                return download(u, headers, dest, label, retries, onProgress)
+            } catch (e: Exception) {
+                last = e
+                if (dest.exists()) dest.delete()
+            }
+        }
+        throw last ?: IllegalStateException("下载失败：无可用直链")
+    }
+
     suspend fun download(
         url: String,
         headers: Map<String, String>,

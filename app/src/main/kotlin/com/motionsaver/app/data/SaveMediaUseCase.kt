@@ -8,10 +8,11 @@ import okhttp3.OkHttpClient
 import java.io.File
 
 /**
- * 全流程编排：解析 →（用户勾选）→ 批量下载 → 音频无损抽取 / 动态照片合成 → 标题命名 → 媒体库落盘。
+ * 全流程编排：解析（支持多条链接）→ 用户勾选 → 批量下载 → 音频无损抽取 /
+ * 动态照片合成 → 标题命名 → 媒体库落盘。
  *
- * 四类资源（图文 / 视频 / 音频 / 动图）走同一条下载链路，只按 kind 决定落盘目录与扩展名。
- * 命名规则在 core 层，已由 JVM 单测覆盖。
+ * 四类资源（图文 / 视频 / 音频 / 动图）走同一条下载链路，只按 kind 决定
+ * 落盘目录与扩展名。命名规则在 core 层，已由 JVM 单测覆盖。
  */
 class SaveMediaUseCase(
     private val context: Context,
@@ -25,11 +26,20 @@ class SaveMediaUseCase(
         data class Err(val reason: String) : ParseOutcome
     }
 
+    /** 一次粘贴多条分享链接时，返回每个作品的解析结果。 */
+    sealed interface ParseAllOutcome {
+        data class Ok(val items: List<ParsedMedia>) : ParseAllOutcome
+        data class Err(val reason: String) : ParseAllOutcome
+    }
+
     data class SavedFile(
         val name: String,
         val location: String,
         val category: SaveCategory,
-        val bytes: Long
+        val bytes: Long,
+        /** 媒体库 content Uri，点开下载记录即可预览 */
+        val previewUri: String = "",
+        val mime: String = ""
     )
 
     sealed interface DownloadOutcome {
@@ -57,6 +67,20 @@ class SaveMediaUseCase(
         }
     }
 
+    /** 支持 2~3 条链接一起粘贴：每条独立解析，失败的单条不影响其它。 */
+    fun analyzeAll(shareText: String, settings: AppSettings): ParseAllOutcome {
+        val registry = ParserRegistry(ParserRegistry.defaultParsers(settings.toEndpointSpec()))
+        return try {
+            val items = registry.parseAll(shareText, OkHttpFetcher(client))
+            if (items.isEmpty()) ParseAllOutcome.Err("没有解析出任何作品，请检查链接是否有效")
+            else ParseAllOutcome.Ok(items)
+        } catch (e: ParseException) {
+            ParseAllOutcome.Err(e.message ?: "解析失败")
+        } catch (e: Exception) {
+            ParseAllOutcome.Err("${e.javaClass.simpleName}: ${e.message}")
+        }
+    }
+
     suspend fun download(
         parsed: ParsedMedia,
         selected: List<MediaResource>,
@@ -73,7 +97,7 @@ class SaveMediaUseCase(
         val failures = mutableListOf<String>()
         val imageCount = selected.count { it.isImage }
 
-        // 1) 逐个下载用户勾选的资源
+        // 1) 逐个下载用户勾选的资源；同一资源的备用直链会自动回退
         selected.forEachIndexed { i, r ->
             val id = "r$i"
             val label = r.label.ifBlank { "资源 ${i + 1}" }
@@ -81,7 +105,7 @@ class SaveMediaUseCase(
                 val ext = r.suggestedExtension()
                 val name = nameFor(parsed.title, r, ext, imageCount, used)
                 val tmp = File(cache, "dl_$id.$ext")
-                downloader.download(r.url, r.headers, tmp, label) { p ->
+                downloader.download(listOf(r.url) + r.alternatives, r.headers, tmp, label) { p ->
                     onEvent(
                         DownloadEvent(
                             id, label, "running", p.fraction,
@@ -90,14 +114,20 @@ class SaveMediaUseCase(
                     )
                 }
 
-                // 音频解析补强：平台没给音频地址时从视频无损抽音轨
-                if (settings.extractAudioFromVideo && r.kind == ResourceKind.VIDEO && parsed.audios.isEmpty()) {
+                // 用户勾选「提取音频」时，从视频无损抽音轨
+                if (settings.extractAudioFromVideo && r.kind == ResourceKind.VIDEO) {
                     val audioName = FileNameAllocator.allocateAuxiliary(parsed.title, "原声", "m4a", used)
                     val audio = AudioExtractor.extract(tmp, File(cache, "audio_$id"))
                     if (audio != null) {
                         val loc = saver.save(audio.file, audioName, "audio/mp4", SaveCategory.AUDIO)
                         used.add(audioName)
-                        saved.add(SavedFile(audioName, loc, SaveCategory.AUDIO, audio.file.length()))
+                        saved.add(
+                            SavedFile(
+                                audioName, loc, SaveCategory.AUDIO, audio.file.length(),
+                                saver.savedUri(audioName, SaveCategory.AUDIO)?.toString().orEmpty(),
+                                "audio/mp4"
+                            )
+                        )
                         audio.file.delete()
                         onEvent(DownloadEvent("${id}_a", "$label · 原声", "done", 1f, "无损抽音轨"))
                     }
@@ -110,7 +140,13 @@ class SaveMediaUseCase(
                 }
                 val location = saver.save(tmp, name, r.mime, category)
                 used.add(name)
-                saved.add(SavedFile(name, location, category, tmp.length()))
+                saved.add(
+                    SavedFile(
+                        name, location, category, tmp.length(),
+                        saver.savedUri(name, category)?.toString().orEmpty(),
+                        r.mime
+                    )
+                )
                 tmp.delete()
                 onEvent(DownloadEvent(id, label, "done", 1f, name))
             } catch (e: Exception) {
@@ -126,8 +162,14 @@ class SaveMediaUseCase(
             val id = "live"
             try {
                 onEvent(DownloadEvent(id, "动态照片合成", "running", 0.1f, "下载封面与动态片段"))
-                val cf = downloader.download(cover.url, cover.headers, File(cache, "live_cover.jpg"), "动态封面")
-                val vf = downloader.download(video.url, video.headers, File(cache, "live_clip.mp4"), "动态片段")
+                val cf = downloader.download(
+                    listOf(cover.url) + cover.alternatives, cover.headers,
+                    File(cache, "live_cover.jpg"), "动态封面"
+                )
+                val vf = downloader.download(
+                    listOf(video.url) + video.alternatives, video.headers,
+                    File(cache, "live_clip.mp4"), "动态片段"
+                )
                 val composed = MotionPhotoWriter.compose(cf.readBytes(), vf.readBytes())
                 val report = MotionPhotoVerifier.verify(composed.bytes)
                 if (!report.valid) error("自检失败：${report.problems.joinToString()}")
@@ -136,7 +178,13 @@ class SaveMediaUseCase(
                 val out = File(cache, name).apply { writeBytes(composed.bytes) }
                 val location = saver.save(out, name, "image/jpeg", SaveCategory.IMAGE)
                 used.add(name)
-                saved.add(SavedFile(name, location, SaveCategory.IMAGE, out.length()))
+                saved.add(
+                    SavedFile(
+                        name, location, SaveCategory.IMAGE, out.length(),
+                        saver.savedUri(name, SaveCategory.IMAGE)?.toString().orEmpty(),
+                        "image/jpeg"
+                    )
+                )
                 listOf(cf, vf, out).forEach { it.delete() }
                 onEvent(
                     DownloadEvent(
@@ -157,7 +205,13 @@ class SaveMediaUseCase(
                 val f = File(cache, name).apply { writeText(parsed.caption, Charsets.UTF_8) }
                 val location = saver.save(f, name, "text/plain", SaveCategory.TEXT)
                 used.add(name)
-                saved.add(SavedFile(name, location, SaveCategory.TEXT, f.length()))
+                saved.add(
+                    SavedFile(
+                        name, location, SaveCategory.TEXT, f.length(),
+                        saver.savedUri(name, SaveCategory.TEXT)?.toString().orEmpty(),
+                        "text/plain"
+                    )
+                )
                 f.delete()
             } catch (e: Exception) {
                 failures.add("正文保存：${e.message}")

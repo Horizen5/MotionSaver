@@ -46,6 +46,13 @@ class ParserRegistry(parsers: List<MediaParser> = defaultParsers()) {
         return parser.parse(shareText, fetcher)
     }
 
+    /** 一次粘贴 2~3 条分享链接时全部识别、逐个解析，任一失败不影响其它条。 */
+    fun parseAll(shareText: String, fetcher: HttpFetcher): List<ParsedMedia> {
+        val urls = ShareText.extractUrls(shareText)
+        if (urls.isEmpty()) return listOf(parse(shareText, fetcher))
+        return urls.mapNotNull { u -> runCatching { parse(u, fetcher) }.getOrNull() }
+    }
+
     fun supported(): String = list.joinToString("、") { it.platform.label }
 
     /** 只看第一个链接，用于解析前预览（不发起网络请求）。 */

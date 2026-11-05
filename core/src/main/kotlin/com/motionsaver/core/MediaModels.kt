@@ -44,7 +44,14 @@ data class MediaResource(
     /** 展示用标签，例如「图 1」「原声 BGM」「1080p」 */
     val label: String = "",
     /** 图集里的序号，从 1 开始；非图集为 -1 */
-    val index: Int = -1
+    val index: Int = -1,
+    /** 同一资源的备用直链（不同 CDN / 不同格式），首选失败时依次回退 */
+    val alternatives: List<String> = emptyList(),
+    /** 原始像素尺寸，0 表示页面未声明 */
+    val width: Int = 0,
+    val height: Int = 0,
+    /** 画质说明，例如「原图 1080×778 · JPEG」 */
+    val qualityLabel: String = ""
 ) {
     val isVideo: Boolean get() = kind == ResourceKind.VIDEO || kind == ResourceKind.LIVE_VIDEO
     val isAudio: Boolean get() = kind == ResourceKind.AUDIO
@@ -105,7 +112,8 @@ data class ParsedMedia(
             hasVid && imgCount <= 1 && !hasAud && !hasAnim -> MediaType.VIDEO
             hasAud && !hasVid && imgCount <= 1 && !hasAnim -> MediaType.AUDIO
             hasAnim && !hasVid && imgCount == 0 -> MediaType.ANIMATED
-            !hasVid && !hasAud && !hasAnim && imgCount > 0 -> MediaType.IMAGE_TEXT
+            // 图文作品常附带原声 BGM，主类型仍应是「图文」，不要误标成「混合」
+            !hasVid && !hasAnim && imgCount > 0 -> MediaType.IMAGE_TEXT
             !hasVid && !hasAud && !hasAnim && imgCount == 0 -> type
             else -> MediaType.MIXED
         }
