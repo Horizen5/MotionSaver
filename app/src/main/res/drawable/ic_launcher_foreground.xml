@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- 向下箭头：下载 -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M48,28 L60,28 L60,58 L72,58 L54,80 L36,58 L48,58 Z" />
+    <!-- 播放三角：动态照片 -->
+    <path
+        android:fillColor="#FFFFC46B"
+        android:pathData="M50,40 L66,49 L50,58 Z" />
+</vector>

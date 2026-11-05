@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">动态存 · MotionSaver</string>
+    <string name="tab_home">解析下载</string>
+    <string name="tab_history">下载记录</string>
+    <string name="tab_settings">设置</string>
+    <string name="hint_share">粘贴抖音 / 小红书分享链接或整段口令</string>
+    <string name="action_parse">解析并下载</string>
+    <string name="disclaimer_short">仅供个人学习研究与保存自己有权保存的内容；请遵守平台条款与著作权法。</string>
+</resources>
