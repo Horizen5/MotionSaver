@@ -182,8 +182,11 @@ object AnimatedGifEncoder {
             bw.write(prefix, codeSize)
             if (next < 4096) {
                 dict[key] = next++
-                // early change：可用码超过当前码长上限时，下一个码起加一位
-                if (next >= (1 shl codeSize) && codeSize < 12) codeSize++
+                // GIF 的 early-change：解码器比编码器慢一个字典条目，
+                // 因此必须等 next **严格大于** 2^codeSize 才能加位。
+                // 写成 >= 会早一位切到 10 位，JDK ImageIO 会宽容跳过，
+                // 但 PIL / 系统相册等严格解码器会报 "broken data stream"。
+                if (next > (1 shl codeSize) && codeSize < 12) codeSize++
             } else {
                 bw.write(CLEAR, codeSize)
                 dict.clear()
