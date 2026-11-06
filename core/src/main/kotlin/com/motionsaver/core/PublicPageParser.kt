@@ -120,8 +120,12 @@ abstract class PublicPageParser : MediaParser {
         for ((headers, _) in strategies) {
             val res = runCatching { fetcher.get(requestUrl, headers) }.getOrNull() ?: continue
             if (res.code !in 200..299) continue
-            // 复用重定向后的完整地址，保留分享参数，避免反复走短链
-            if (res.finalUrl.isNotBlank()) requestUrl = res.finalUrl
+            // 复用重定向后的完整地址，保留分享参数，避免反复走短链。
+            // 图集短链会落到 /share/slides/{id}/（只回未渲染页面壳），这里归一化为
+            // 同 ID 的 /share/note/{id}/，后续策略用它能拿到完整 _ROUTER_DATA。
+            if (res.finalUrl.isNotBlank()) {
+                requestUrl = ShareLinkNormalizer.canonicalShareUrl(res.finalUrl)
+            }
 
             val html = res.text()
             val snap = PageSnapshot(

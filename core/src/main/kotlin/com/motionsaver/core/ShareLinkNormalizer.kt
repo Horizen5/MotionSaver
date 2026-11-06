@@ -13,12 +13,29 @@ object ShareLinkNormalizer {
     /** 从任意分享文案里取出链接；没有链接时返回 null。 */
     fun urlOf(shareText: String): String? = ShareText.extractUrl(shareText)
 
+    /**
+     * 图集短链会 302 到 `/share/slides/{id}/`，而该路径只返回未渲染的页面壳
+     * （实测 25KB、0 资源）；同一 itemId 的 `/share/note/{id}/` 会返回完整
+     * `_ROUTER_DATA`（实测 53KB、3 张图）。因此把 slides 路径统一改写成 note 路径。
+     *
+     * 短链本身不含该路径，需在网络层跟随重定向拿到 finalUrl 后再调用本函数。
+     * 直接粘贴长链时由 [normalize] 提前处理。
+     */
+    private val SLIDES_PATH = Regex(
+        """(?:www\.|m\.)?(?:iesdouyin|douyin)\.com/share/slides/(\d{6,})""",
+        RegexOption.IGNORE_CASE
+    )
+
+    fun canonicalShareUrl(url: String): String =
+        SLIDES_PATH.find(url)?.let { "https://www.iesdouyin.com/share/note/${it.groupValues[1]}/" }
+            ?: url
+
     /** 补齐协议、去掉明显误粘的尾部字符。短链原样保留（重定向由网络层处理）。 */
     fun normalize(url: String): String {
         var u = url.trim()
         if (u.startsWith("//")) u = "https:$u"
         if (!u.startsWith("http://") && !u.startsWith("https://")) u = "https://$u"
-        return u
+        return canonicalShareUrl(u)
     }
 
     fun isShortLink(url: String): Boolean =
@@ -29,10 +46,10 @@ object ShareLinkNormalizer {
     /** 提取作品 ID，用于命名兜底与历史去重。 */
     fun itemIdOf(url: String): String {
         listOf(
-            Regex("""(?:modal_id|aweme_id|note_id|itemId|video|note|item)[/=]([A-Za-z0-9_-]{6,})"""),
+            Regex("""(?:modal_id|aweme_id|note_id|itemId|video|note|slides|item)[/=]([A-Za-z0-9_-]{6,})"""),
             Regex("""/explore/([A-Za-z0-9]{8,})"""),
             Regex("""/discovery/([A-Za-z0-9]{8,})"""),
-            Regex("""/(?:video|share/video|note)/(\d{6,})"""),
+            Regex("""/(?:video|share/video|share/slides|share/note|note|slides)/(\d{6,})"""),
             Regex("""/([a-zA-Z0-9]{16,24})/?(?:[?#]|$)""")
         ).forEach { r ->
             r.find(url)?.groupValues?.get(1)?.let { return it }

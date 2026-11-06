@@ -9,6 +9,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
@@ -25,25 +26,50 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
+import coil.request.ImageRequest
 import com.motionsaver.app.MainUiState
 import com.motionsaver.app.MainViewModel
+import com.motionsaver.app.MotionSaverApp
 import com.motionsaver.app.QueueItem
 import com.motionsaver.app.data.AppSettings
 import com.motionsaver.app.data.HistoryEntry
 import com.motionsaver.core.MediaResource
+import com.motionsaver.core.MediaType
 import com.motionsaver.core.ParsedMedia
 import com.motionsaver.core.ResourceKind
 import java.text.SimpleDateFormat
 import java.util.*
 
 private val Scrim = Color(0x66000000)
+private val TAB_LABELS = listOf("解析下载", "队列", "记录", "设置")
+private val TAB_ICONS = listOf("↓", "≡", "◷", "⚙")
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun AppRoot(vm: MainViewModel) {
-    val state by vm.ui.collectAsState()
+fun AppRoot(
+    container: MotionSaverApp.Container,
+    initialSharedText: String? = null
+) {
+    val ctx = LocalContext.current
+    val vm: MainViewModel = viewModel(
+        factory = MainViewModel.Factory(
+            container.saveMedia,
+            container.settings,
+            container.history,
+            ctx.applicationContext
+        )
+    )
+    // lifecycle 感知：App 退到后台时不重组、不刷新，降低占用与耗电
+    val state by vm.ui.collectAsStateWithLifecycle()
     var tab by remember { mutableIntStateOf(0) }
+
+    // 外部分享文本只灌一次，避免旋转/重组时反复触发
+    LaunchedEffect(initialSharedText) {
+        if (!initialSharedText.isNullOrBlank()) vm.onInputChange(initialSharedText)
+    }
 
     Scaffold(
         topBar = {
@@ -56,12 +82,12 @@ fun AppRoot(vm: MainViewModel) {
         },
         bottomBar = {
             NavigationBar {
-                listOf("解析下载", "队列", "记录", "设置").forEachIndexed { i, label ->
+                TAB_LABELS.forEachIndexed { i, label ->
                     NavigationBarItem(
                         selected = tab == i,
                         onClick = { tab = i },
                         label = { Text(label) },
-                        icon = { Text(listOf("↓", "≡", "◷", "⚙")[i]) }
+                        icon = { Text(TAB_ICONS[i]) }
                     )
                 }
             }
@@ -84,90 +110,114 @@ fun AppRoot(vm: MainViewModel) {
 private fun HomeScreen(state: MainUiState, vm: MainViewModel) {
     var preview by remember { mutableStateOf<MediaResource?>(null) }
 
-    Column(
-        Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(16.dp),
+    // 稳定回调：ViewModel 实例不变时复用同一个 lambda，让子组件能跳过重组
+    val onAnalyze = remember(vm) { { vm.analyze() } }
+    val onDownload = remember(vm) { { vm.downloadSelected() } }
+    val onClearAll = remember(vm) { { vm.clearAll() } }
+    val onClearMessage = remember(vm) { { vm.clearMessage() } }
+    val onClearResults = remember(vm) { { vm.clearResults() } }
+    val onPreview: (MediaResource) -> Unit = remember { { preview = it } }
+    val onDismissPreview = remember { { preview = null } }
+
+    // LazyColumn 只组合可见项：粘贴多条链接时不再一次性把所有缩略图全量组合，
+    // 滚动/选中/输入时的重组范围大幅缩小，配合高刷与 AOT 消除掉帧。
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("粘贴分享链接（可一次贴多条）", Modifier.weight(1f),
-                style = MaterialTheme.typography.titleMedium)
-            TextButton(
-                onClick = vm::clearAll,
-                enabled = state.input.isNotEmpty() || state.results.isNotEmpty()
-            ) { Text("清空") }
+        item(key = "input_header") {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("粘贴分享链接（可一次贴多条）", Modifier.weight(1f),
+                    style = MaterialTheme.typography.titleMedium)
+                TextButton(
+                    onClick = onClearAll,
+                    enabled = state.input.isNotEmpty() || state.results.isNotEmpty()
+                ) { Text("清空") }
+            }
         }
 
-        OutlinedTextField(
-            value = state.input,
-            onValueChange = vm::onInputChange,
-            modifier = Modifier.fillMaxWidth().heightIn(min = 100.dp),
-            placeholder = { Text("抖音 / 小红书 / 任意网页链接，可粘贴 2~3 条整段口令") },
-            enabled = !state.isAnalyzing && !state.isDownloading,
-            maxLines = 8
-        )
+        item(key = "input_field") {
+            OutlinedTextField(
+                value = state.input,
+                onValueChange = vm::onInputChange,
+                modifier = Modifier.fillMaxWidth().heightIn(min = 100.dp),
+                placeholder = { Text("抖音 / 小红书 / 任意网页链接，可粘贴 2~3 条整段口令") },
+                enabled = !state.isAnalyzing && !state.isDownloading,
+                maxLines = 8
+            )
+        }
 
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(
-                onClick = vm::analyze,
-                modifier = Modifier.weight(1f),
-                enabled = !state.isAnalyzing && !state.isDownloading
-            ) { Text(if (state.isAnalyzing) "解析中…" else "① 解析") }
+        item(key = "action_row") {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(
+                    onClick = onAnalyze,
+                    modifier = Modifier.weight(1f),
+                    enabled = !state.isAnalyzing && !state.isDownloading
+                ) { Text(if (state.isAnalyzing) "解析中…" else "① 解析") }
 
-            Button(
-                onClick = vm::downloadSelected,
-                modifier = Modifier.weight(1f),
-                enabled = state.results.isNotEmpty() && !state.isDownloading
-            ) { Text(if (state.isDownloading) "下载中…" else "② 下载选中 ${state.selectedIds.size}") }
+                Button(
+                    onClick = onDownload,
+                    modifier = Modifier.weight(1f),
+                    enabled = state.results.isNotEmpty() && !state.isDownloading
+                ) { Text(if (state.isDownloading) "下载中…" else "② 下载选中 ${state.selectedIds.size}") }
+            }
         }
 
         if (state.isAnalyzing || state.isDownloading) {
-            LinearProgressIndicator(Modifier.fillMaxWidth())
+            item(key = "progress") { LinearProgressIndicator(Modifier.fillMaxWidth()) }
         }
 
-        // 多条链接 → 每个作品一张结果卡
-        state.results.forEachIndexed { i, p ->
-            ResultCard(i, p, state, vm) { preview = it }
+        itemsIndexed(
+            items = state.results,
+            // 稳定 key：解析结果顺序变化或勾选状态变化时复用同一张卡组合
+            key = { _, p -> "result_${p.itemId.ifBlank { p.sourceUrl }}" }
+        ) { i, p ->
+            ResultCard(i, p, state, vm, onPreview, onClearResults)
         }
 
         if (state.message.isNotEmpty()) {
-            Card(
-                colors = CardDefaults.cardColors(
-                    containerColor = if (state.isError) MaterialTheme.colorScheme.errorContainer
-                    else MaterialTheme.colorScheme.secondaryContainer
-                ),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Column(Modifier.padding(12.dp)) {
-                    Text(state.message, style = MaterialTheme.typography.bodySmall)
-                    Row {
-                        TextButton(onClick = vm::clearMessage) { Text("关闭") }
-                        if (state.results.isNotEmpty()) {
-                            TextButton(onClick = vm::clearResults) { Text("清空结果") }
+            item(key = "message") {
+                Card(
+                    colors = CardDefaults.cardColors(
+                        containerColor = if (state.isError) MaterialTheme.colorScheme.errorContainer
+                        else MaterialTheme.colorScheme.secondaryContainer
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(Modifier.padding(12.dp)) {
+                        Text(state.message, style = MaterialTheme.typography.bodySmall)
+                        Row {
+                            TextButton(onClick = onClearMessage) { Text("关闭") }
+                            if (state.results.isNotEmpty()) {
+                                TextButton(onClick = onClearResults) { Text("清空结果") }
+                            }
                         }
                     }
                 }
             }
         }
 
-        HorizontalDivider(Modifier.padding(vertical = 6.dp))
-        Text("支持：${vm.supportedPlatforms}", style = MaterialTheme.typography.bodySmall)
-        Text(
-            "点缩略图直接预览；右上角圆圈点一下选中、再点取消；选中卡片会浮起放大。" +
-                "图集默认选最高质量 JPEG 原图，自动排除水印与缩放版本。",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-        Text(
-            "仅供保存自己有权保存的内容；请遵守平台条款与适用法律。",
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
+        item(key = "footer") {
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                HorizontalDivider(Modifier.padding(vertical = 6.dp))
+                Text("支持：${vm.supportedPlatforms}", style = MaterialTheme.typography.bodySmall)
+                Text(
+                    "点缩略图直接预览；右上角圆圈点一下选中、再点取消；选中卡片会浮起放大。" +
+                        "图集默认选最高质量 JPEG 原图，自动排除水印与缩放版本。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Text(
+                    "仅供保存自己有权保存的内容；请遵守平台条款与适用法律。",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
     }
 
-    preview?.let { r -> PreviewDialog(r) { preview = null } }
+    preview?.let { r -> PreviewDialog(r, onDismissPreview) }
 }
 
 @Composable
@@ -176,10 +226,27 @@ private fun ResultCard(
     p: ParsedMedia,
     state: MainUiState,
     vm: MainViewModel,
-    onPreview: (MediaResource) -> Unit
+    onPreview: (MediaResource) -> Unit,
+    onClearResults: () -> Unit
 ) {
     val all = p.resources
-    val allSelected = all.isNotEmpty() && all.all { it.url in state.selectedIds }
+    // 只在 selectedIds 变化时重算，避免输入文字等无关状态改动触发整卡重组
+    val allSelected by remember(p, state.selectedIds) {
+        derivedStateOf { all.isNotEmpty() && all.all { it.url in state.selectedIds } }
+    }
+    val onToggleAll = remember(vm, index) { { vm.toggleAllIn(index) } }
+    val onSetExtractAudio: (Boolean) -> Unit = remember(vm) { { v: Boolean -> vm.setExtractAudio(v) } }
+    val onSelectAll = remember(vm) { { vm.selectAll() } }
+    val onSelectNone = remember(vm) { { vm.selectNone() } }
+    // 分组按 resources 引用缓存，勾选状态变化不重复切分列表
+    val groups = remember(p.resources) {
+        listOf(
+            "图文" to p.byKind(ResourceKind.IMAGE),
+            "视频" to p.videos,
+            "音频" to p.audios,
+            "动图" to p.byKind(ResourceKind.ANIMATED)
+        ).filter { it.second.isNotEmpty() }
+    }
 
     Card(
         Modifier.fillMaxWidth(),
@@ -195,25 +262,18 @@ private fun ResultCard(
                     }
                 }
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Checkbox(checked = allSelected, onCheckedChange = { vm.toggleAllIn(index) })
+                    Checkbox(checked = allSelected, onCheckedChange = { onToggleAll() })
                     Text("全选", style = MaterialTheme.typography.labelSmall)
                 }
-                TextButton(onClick = vm::clearResults) { Text("清空") }
+                TextButton(onClick = onClearResults) { Text("清空") }
             }
 
             // 解析后是否提取音频
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("提取音频（视频无损抽音轨）", Modifier.weight(1f),
                     style = MaterialTheme.typography.bodySmall)
-                Switch(checked = state.extractAudio, onCheckedChange = vm::setExtractAudio)
+                Switch(checked = state.extractAudio, onCheckedChange = onSetExtractAudio)
             }
-
-            val groups = listOf(
-                "图文" to p.byKind(ResourceKind.IMAGE),
-                "视频" to p.videos,
-                "音频" to p.audios,
-                "动图" to p.byKind(ResourceKind.ANIMATED)
-            ).filter { it.second.isNotEmpty() }
 
             if (groups.isEmpty() && !p.isLivePhoto) {
                 Text(
@@ -233,8 +293,8 @@ private fun ResultCard(
                             ResourceTile(
                                 r = r,
                                 selected = r.url in state.selectedIds,
-                                onToggle = { vm.toggle(r.url) },
-                                onPreview = { onPreview(r) }
+                                onToggle = remember(vm, r.url) { { vm.toggle(r.url) } },
+                                onPreview = remember(r, onPreview) { { onPreview(r) } }
                             )
                         }
                         repeat(3 - rowItems.size) { Spacer(Modifier.weight(1f).padding(4.dp)) }
@@ -242,15 +302,19 @@ private fun ResultCard(
                 }
             }
 
-            if (p.isLivePhoto) {
-                Text("检测到实况图 · 将合成为小米动态照片",
+            when {
+                p.isLivePhoto -> Text("检测到实况图 · 将合成为小米动态照片",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.primary)
+                // 识别到实况图作品但公开页没给动态片段：如实说明，不谎称会合成
+                p.livePhotoWork -> Text("已识别为实况图作品 · 静态帧与原声可下载；动态片段需在高级设置接入端点补齐",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.primary)
             }
 
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                TextButton(onClick = vm::selectAll) { Text("全部作品全选") }
-                TextButton(onClick = vm::selectNone) { Text("全不选") }
+                TextButton(onClick = onSelectAll) { Text("全部作品全选") }
+                TextButton(onClick = onSelectNone) { Text("全不选") }
             }
 
             p.warnings.forEach {
@@ -273,15 +337,27 @@ private fun RowScope.ResourceTile(
     onToggle: () -> Unit,
     onPreview: () -> Unit
 ) {
+    // 缩略图限制解码尺寸：原图可达 1660×2142（解码后约 14MB/张），
+    // 多张同时解码会引发大量 GC 造成滚动掉帧。缩略图只需 320px 级别。
+    val ctx = LocalContext.current
+    val imageRequest = remember(r.url) {
+        ImageRequest.Builder(ctx)
+            .data(r.url)
+            .size(320)
+            .crossfade(false)
+            .build()
+    }
+
     Card(
         modifier = Modifier
             .weight(1f)
             .padding(4.dp)
+            // graphicsLayer 的 lambda 形式在绘制阶段读取 selected，选中变化不触发重组
             .graphicsLayer {
                 scaleX = if (selected) 1.04f else 1f
                 scaleY = if (selected) 1.04f else 1f
             }
-            .clickable { onPreview() },
+            .clickable(onClick = onPreview),
         elevation = CardDefaults.cardElevation(defaultElevation = if (selected) 10.dp else 1.dp),
         colors = CardDefaults.cardColors(
             containerColor = if (selected) MaterialTheme.colorScheme.primaryContainer
@@ -291,7 +367,7 @@ private fun RowScope.ResourceTile(
         Box {
             if (r.isImage || r.kind == ResourceKind.COVER || r.kind == ResourceKind.ANIMATED) {
                 AsyncImage(
-                    model = r.url,
+                    model = imageRequest,
                     contentDescription = r.label,
                     contentScale = ContentScale.Crop,
                     modifier = Modifier.fillMaxWidth().height(110.dp)
@@ -519,10 +595,11 @@ private fun SettingsScreen(state: MainUiState, vm: MainViewModel) {
         Text("设置", style = MaterialTheme.typography.titleLarge)
         Card(Modifier.fillMaxWidth()) {
             Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text("MotionSaver 2.2.0", fontWeight = FontWeight.SemiBold)
+                Text("MotionSaver 2.3.0 · 流畅版", fontWeight = FontWeight.SemiBold)
                 Text(
                     "粘贴链接 → 解析 → 点缩略图预览 → 圆圈选中 → 下载。" +
-                        "解析结果页可直接切换「提取音频」与全选。",
+                        "解析结果页可直接切换「提取音频」与全选。\n" +
+                        "本版为 release 预编译包：R8 全量优化 + Baseline Profile AOT，启动与滚动更顺滑。",
                     style = MaterialTheme.typography.bodySmall
                 )
             }
@@ -631,7 +708,8 @@ private fun AdvancedSettingsScreen(
         InfoRow("解析方式", "公开页访客渲染数据 / JSON-LD / og:* 三层兜底；不构造私有签名、不绕过鉴权")
         InfoRow("画质", "图集自动选最高质量 JPEG 候选，排除水印与缩放模板；多 CDN 直链自动回退")
         InfoRow("动态照片", "JPEG + 尾部 MP4 + XMP 偏移元数据，字节级无损拼接")
-        InfoRow("架构", "core 纯 JVM 核心库（70 项单测）+ app Compose 层；arm64-v8a；minSdk 26")
+        InfoRow("架构", "core 纯 JVM 核心库（81 项单测）+ app Compose 层；arm64-v8a；minSdk 26")
+        InfoRow("性能", "release + R8 全量优化 + Baseline Profile AOT 预编译；请求设备高刷新率；列表按需组合")
         Spacer(Modifier.height(8.dp))
     }
 }

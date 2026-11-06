@@ -53,6 +53,10 @@ object RouterDataParser {
             .ifBlank { Json.str(item["nickname"]) }
         val itemId = Json.str(item["aweme_id"]).ifBlank { ShareLinkNormalizer.itemIdOf(sourceUrl) }
 
+        // 实况图作品（Live Photo）：单张静态帧 + 原声，动态视频片段不在公开页里。
+        // 识别出来后明确标注，绝不把 M4A 音频伪装成视频、也不伪造小米动态照片。
+        val liveWork = isLivePhotoWork(item, images)
+
         val notes = mutableListOf<String>()
         notes.add("数据源：公开分享页访客渲染数据 _ROUTER_DATA.videoInfoRes")
         if (images.isNotEmpty()) {
@@ -64,18 +68,52 @@ object RouterDataParser {
         if (videos.isNotEmpty()) notes.add("视频：已挑最高码率直链")
         if (audios.isNotEmpty()) notes.add("原声：单独列出，可勾选是否下载")
 
-        return ParsedMedia(
+        val warnings = mutableListOf<String>()
+        if (liveWork) {
+            notes.add("已识别为实况图（Live Photo）作品：静态帧采用实况专用 lqen 模板，配乐为 M4A 原声")
+            warnings.add("这是实况图作品，公开分享页只提供静态帧与原声，动态视频片段（MP4）未在公开数据中暴露。")
+            warnings.add("如需完整动态照片，请在「设置 → 高级设置 → 解析端点」接入自己的合规数据源，返回 cover 与 live_video 字段后会自动合成小米动态照片。")
+        }
+
+        val parsed = ParsedMedia(
             platform = platform,
-            type = MediaType.MIXED,
+            type = if (liveWork) MediaType.LIVE_PHOTO else MediaType.MIXED,
             title = mainTitle(desc).ifBlank { defaultTitle },
             author = author,
             caption = desc,
             itemId = itemId,
             sourceUrl = sourceUrl,
             resources = resources,
-            warnings = emptyList(),
+            liveCover = if (liveWork) images.firstOrNull()?.copy(kind = ResourceKind.COVER) else null,
+            liveVideo = null,
+            livePhotoWork = liveWork,
+            warnings = warnings,
             notes = notes
-        ).let { it.copy(type = it.inferredType()) }
+        )
+        // 实况图保持 LIVE_PHOTO 标签；否则按资源构成推断，避免被误标成「音频」
+        return if (liveWork) parsed else parsed.copy(type = parsed.inferredType())
+    }
+
+    /**
+     * 实况图作品判据（实测抖音「实况 / live 动图」作品结构）：
+     *  - 恰好 1 张图，且候选直链带实况专用模板 `lqen`（lqen-new）
+     *  - `video.play_addr` 存在但 `duration=0`、`bit_rate=null`（没有真实视频轨，只是配乐容器）
+     *  - `aweme_type=2`（图文作品）
+     * 三者同时满足才判定，避免把普通单图或普通图文误标成实况图。
+     */
+    private val LIVE_TEMPLATE = Regex("""~tplv-[a-z0-9-]*lqen""", RegexOption.IGNORE_CASE)
+
+    private fun isLivePhotoWork(item: Map<String, Any?>, images: List<MediaResource>): Boolean {
+        if (images.size != 1) return false
+        val hasLiveTemplate = (listOf(images[0].url) + images[0].alternatives)
+            .any { LIVE_TEMPLATE.containsMatchIn(it) }
+        if (!hasLiveTemplate) return false
+        val video = Json.obj(item["video"])
+        val hasPlayAddr = Json.str(Json.path(video, "play_addr", "uri")).isNotBlank() ||
+            Json.strings(Json.path(video, "play_addr", "url_list")).isNotEmpty()
+        val noRealVideo = video["bit_rate"] == null && Json.int(video["duration"]) == 0
+        val imagePost = Json.int(item["aweme_type"]) == 2 || item["aweme_type"] == null
+        return hasPlayAddr && noRealVideo && imagePost
     }
 
     // ---------------------------------------------------------------- 结构定位
@@ -161,10 +199,13 @@ object RouterDataParser {
         }.filter { it.startsWith("http") }.distinct()
         val url = direct.firstOrNull() ?: return emptyList()
         val musicTitle = Json.str(Json.path(item, "music", "title"))
+        // 实测图文作品的 play_addr 返回 ftypM4A / audio/mp4；旧版写死 audio/mpeg
+        // 会让文件被命名成 .mp3 却装着 M4A，系统播放器打不开。
+        val mp3 = url.contains(".mp3", ignoreCase = true)
         return listOf(
             MediaResource(
                 url = url,
-                mime = "audio/mpeg",
+                mime = if (mp3) "audio/mpeg" else "audio/mp4",
                 kind = ResourceKind.AUDIO,
                 label = if (musicTitle.isNotBlank()) "原声 · ${musicTitle.take(24)}" else "原声 BGM",
                 alternatives = direct.drop(1),

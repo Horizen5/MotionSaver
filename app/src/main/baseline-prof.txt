@@ -1,0 +1,48 @@
+# Baseline Profile（HRF，AGP 构建时编译为 assets/dexopt/baseline.prof）
+# 侧载安装后由 ProfileInstaller 写入 ART，触发 dexopt 对启动路径与滚动热路径做 AOT 预编译：
+# 首次启动即走本地机器码，不再依赖 JIT 预热，避免"卡卡的"。
+# 采用类级规则（整类标记为热，不带 flags）；AGP 结合 R8 mapping 重写为混淆后名称，
+# 被裁剪掉的类会被安全跳过。方法级规则才允许 H/S/P 前缀。
+
+# ---- 冷启动关键路径 ----
+Lcom/motionsaver/app/MotionSaverApp;
+Lcom/motionsaver/app/MainActivity;
+Lcom/motionsaver/app/MainViewModel;
+Lcom/motionsaver/app/ui/AppUiKt;
+Lcom/motionsaver/app/ui/MotionSaverThemeKt;
+
+# ---- 依赖容器与首屏数据 ----
+Lcom/motionsaver/app/MotionSaverApp$Container;
+Lcom/motionsaver/app/data/SettingsStore;
+Lcom/motionsaver/app/data/HistoryStore;
+
+# ---- 解析主链路（点「解析」后的热路径）----
+Lcom/motionsaver/app/data/SaveMediaUseCase;
+Lcom/motionsaver/app/data/OkHttpFetcher;
+Lcom/motionsaver/core/ParserRegistry;
+Lcom/motionsaver/core/DouyinParser;
+Lcom/motionsaver/core/XiaohongshuParser;
+Lcom/motionsaver/core/GenericParser;
+Lcom/motionsaver/core/PublicPageParser;
+Lcom/motionsaver/core/RouterDataParser;
+Lcom/motionsaver/core/JsonLdParser;
+Lcom/motionsaver/core/JsonLdMedia;
+Lcom/motionsaver/core/Json;
+Lcom/motionsaver/core/MiniJson;
+Lcom/motionsaver/core/ShareLinkNormalizer;
+Lcom/motionsaver/core/ShareText;
+Lcom/motionsaver/core/MediaTypeDetector;
+Lcom/motionsaver/core/TitleSanitizer;
+Lcom/motionsaver/core/FileNameAllocator;
+Lcom/motionsaver/core/MediaResource;
+Lcom/motionsaver/core/ParsedMedia;
+Lcom/motionsaver/core/EndpointParser;
+Lcom/motionsaver/core/EndpointSpec;
+
+# ---- 下载 / 落盘 / 动态照片合成 ----
+Lcom/motionsaver/app/data/Downloader;
+Lcom/motionsaver/app/data/MediaStoreSaver;
+Lcom/motionsaver/app/data/AudioExtractor;
+Lcom/motionsaver/core/MotionPhotoWriter;
+Lcom/motionsaver/core/MotionPhotoVerifier;
+Lcom/motionsaver/core/MotionPhotoXmp;

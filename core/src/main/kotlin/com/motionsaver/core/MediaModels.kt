@@ -84,6 +84,12 @@ data class ParsedMedia(
     val resources: List<MediaResource> = emptyList(),
     val liveCover: MediaResource? = null,
     val liveVideo: MediaResource? = null,
+    /**
+     * 识别到「实况图作品」（静态帧 + 动态片段的图集），但公开页只给了静态帧与原声、
+     * 未暴露动态视频片段。为 true 时 UI 显示实况图标签与补齐指引，且绝不伪造合成
+     * （[isLivePhoto] 仍要求 liveVideo 非空）。
+     */
+    val livePhotoWork: Boolean = false,
     /** 需要用户注意但不阻断下载的信息（例如公开页未暴露视频直链） */
     val warnings: List<String> = emptyList(),
     /** 诊断信息（命中了哪些字段、来源是什么） */

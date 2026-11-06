@@ -3,9 +3,12 @@ package com.motionsaver.app
 import android.app.Application
 import coil.Coil
 import coil.ImageLoader
+import coil.disk.DiskCache
+import coil.memory.MemoryCache
 import com.motionsaver.app.data.HistoryStore
 import com.motionsaver.app.data.SaveMediaUseCase
 import com.motionsaver.app.data.SettingsStore
+import okhttp3.ConnectionPool
 import okhttp3.OkHttpClient
 import java.util.concurrent.TimeUnit
 
@@ -16,13 +19,18 @@ class MotionSaverApp : Application() {
         private set
 
     class Container(app: MotionSaverApp) {
+        // 单一连接池复用，避免每次解析/下载都新建 TCP+TLS 连接
+        private val pool = ConnectionPool(5, 5, TimeUnit.MINUTES)
+
         val http: OkHttpClient by lazy {
             OkHttpClient.Builder()
+                .connectionPool(pool)
                 .connectTimeout(20, TimeUnit.SECONDS)
                 .readTimeout(90, TimeUnit.SECONDS)
                 .writeTimeout(30, TimeUnit.SECONDS)
                 .followRedirects(true)
                 .followSslRedirects(true)
+                .retryOnConnectionFailure(true)
                 .build()
         }
         val settings: SettingsStore by lazy { SettingsStore(app) }
@@ -33,11 +41,24 @@ class MotionSaverApp : Application() {
     override fun onCreate() {
         super.onCreate()
         container = Container(this)
-        // 预览缩略图走独立客户端：CDN 直链需要常规 UA 与 Referer
+        // 缩略图走独立客户端（CDN 需要常规 UA 与 Referer）。
+        // 关闭 crossfade 与弱引用之外的动画开销，限制内存/磁盘缓存，降低 GC 与占用。
         Coil.setImageLoader(
             ImageLoader.Builder(this)
                 .okHttpClient(previewClient())
-                .crossfade(true)
+                .crossfade(false)
+                .memoryCache {
+                    MemoryCache.Builder(this)
+                        // 最多占用堆的 12%，避免大图缓存把可用内存吃满触发 GC 掉帧
+                        .maxSizePercent(0.12)
+                        .build()
+                }
+                .diskCache {
+                    DiskCache.Builder()
+                        .directory(cacheDir.resolve("ms_image_cache"))
+                        .maxSizeBytes(32L * 1024 * 1024)
+                        .build()
+                }
                 .build()
         )
     }

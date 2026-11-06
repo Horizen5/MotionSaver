@@ -1,0 +1,11 @@
+# Startup Profile：AGP 用它重排 dex 中的类，把冷启动真正用到的类聚到一起，
+# 减少启动阶段的缺页与随机 I/O（Dex Layout Optimization）。
+# 只放启动必需类，避免把整个 dex 都标成 startup。
+Lcom/motionsaver/app/MotionSaverApp;
+Lcom/motionsaver/app/MotionSaverApp$Container;
+Lcom/motionsaver/app/MainActivity;
+Lcom/motionsaver/app/MainViewModel;
+Lcom/motionsaver/app/ui/AppUiKt;
+Lcom/motionsaver/app/ui/MotionSaverThemeKt;
+Lcom/motionsaver/app/data/SettingsStore;
+Lcom/motionsaver/app/data/HistoryStore;
