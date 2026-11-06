@@ -20,6 +20,7 @@ class SaveMediaUseCase(
 ) {
     private val downloader = Downloader(client)
     private val saver = MediaStoreSaver(context)
+    private val composer = LocalAnimatedComposer()
 
     sealed interface ParseOutcome {
         data class Ok(val media: ParsedMedia) : ParseOutcome
@@ -95,10 +96,16 @@ class SaveMediaUseCase(
         val used = existing.toMutableSet()
         val saved = mutableListOf<SavedFile>()
         val failures = mutableListOf<String>()
-        val imageCount = selected.count { it.isImage }
+
+        // 本地合成动图不走网络下载，单独处理；其余为真实直链资源
+        val composeTasks = selected.filter { it.isLocalCompose }
+        val realSelected = selected.filter { !it.isLocalCompose }
+        val imageCount = realSelected.count { it.isImage }
+        /** 已下载的静态帧，按 URL 复用，避免合成分支重复下载同一张图 */
+        val framesByUrl = mutableMapOf<String, File>()
 
         // 1) 逐个下载用户勾选的资源；同一资源的备用直链会自动回退
-        selected.forEachIndexed { i, r ->
+        realSelected.forEachIndexed { i, r ->
             val id = "r$i"
             val label = r.label.ifBlank { "资源 ${i + 1}" }
             try {
@@ -147,6 +154,14 @@ class SaveMediaUseCase(
                         r.mime
                     )
                 )
+                // 静态帧留一份副本给本地动图合成复用（合成结束统一清理）
+                if (r.isImage && !r.isLocalCompose) {
+                    runCatching {
+                        val keep = File(cache, "frame_$id.jpg")
+                        tmp.copyTo(keep, overwrite = true)
+                        framesByUrl[r.url] = keep
+                    }
+                }
                 tmp.delete()
                 onEvent(DownloadEvent(id, label, "done", 1f, name))
             } catch (e: Exception) {
@@ -155,7 +170,86 @@ class SaveMediaUseCase(
             }
         }
 
-        // 2) 实况图 → 小米动态照片（单文件 JPG，无损拼接）
+        // 2) 本地合成动图：静态帧 → GIF 轮播 + 小米动态照片
+        //    公开页只给静态帧与原声，动态片段由设备本地编码，不依赖平台私有接口。
+        for (task in composeTasks) {
+            val id = "anim"
+            val label = task.label.ifBlank { "动图合成" }
+            try {
+                onEvent(DownloadEvent(id, label, "running", 0.05f, "准备静态帧"))
+                val frames = mutableListOf<File>()
+                task.composeFrames.forEachIndexed { fi, url ->
+                    val cached = framesByUrl[url]
+                    if (cached != null && cached.exists() && cached.length() > 0) {
+                        frames += cached
+                    } else {
+                        // 用户没勾选该静态图时按需补下载，并带上解析器给出的备用直链
+                        val src = parsed.images.firstOrNull { it.url == url }
+                        val candidates = listOf(url) + (src?.alternatives ?: emptyList())
+                        val dest = File(cache, "anim_frame_$fi.jpg")
+                        runCatching {
+                            downloader.download(
+                                candidates, src?.headers ?: task.headers, dest, "动图帧 ${fi + 1}"
+                            )
+                        }.getOrNull()?.let { frames += it }
+                    }
+                }
+                if (frames.isEmpty()) {
+                    failures.add("动图：静态帧下载失败")
+                    onEvent(DownloadEvent(id, label, "failed", 0f, "静态帧下载失败"))
+                    continue
+                }
+
+                val result = composer.compose(
+                    frames = frames,
+                    coverJpeg = frames.first(),
+                    wantMotionPhoto = settings.motionPhotoEnabled,
+                    cache = cache
+                ) { phase -> onEvent(DownloadEvent(id, label, "running", 0.4f, phase)) }
+
+                val outputs = listOfNotNull(
+                    result.gif?.let {
+                        Triple(
+                            it,
+                            FileNameAllocator.allocateAuxiliary(parsed.title, "动图", "gif", used),
+                            "image/gif"
+                        )
+                    },
+                    result.motionPhoto?.let {
+                        Triple(
+                            it,
+                            FileNameAllocator.allocateAuxiliary(parsed.title, "动态照片", "jpg", used),
+                            "image/jpeg"
+                        )
+                    }
+                )
+                for ((file, name, mime) in outputs) {
+                    val location = saver.save(file, name, mime, SaveCategory.IMAGE)
+                    used.add(name)
+                    saved.add(
+                        SavedFile(
+                            name, location, SaveCategory.IMAGE, file.length(),
+                            saver.savedUri(name, SaveCategory.IMAGE)?.toString().orEmpty(), mime
+                        )
+                    )
+                }
+                if (outputs.isEmpty()) {
+                    failures.add("动图：${result.detail}")
+                    onEvent(DownloadEvent(id, label, "failed", 0f, result.detail))
+                } else {
+                    onEvent(DownloadEvent(id, label, "done", 1f, result.detail))
+                }
+            } catch (e: Exception) {
+                failures.add("动图：${e.message}")
+                onEvent(DownloadEvent(id, label, "failed", 0f, e.message ?: "失败"))
+            }
+        }
+        // 合成用的中间帧统一清理，避免缓存堆积
+        framesByUrl.values.forEach { runCatching { it.delete() } }
+        cache.listFiles()?.filter { it.name.startsWith("anim_frame_") }
+            ?.forEach { runCatching { it.delete() } }
+
+        // 3) 端点/页面给出真实动态片段时 → 小米动态照片（单文件 JPG，无损拼接）
         if (settings.motionPhotoEnabled && parsed.isLivePhoto) {
             val cover = parsed.liveCover!!
             val video = parsed.liveVideo!!

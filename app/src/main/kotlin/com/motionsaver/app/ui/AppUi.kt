@@ -306,8 +306,12 @@ private fun ResultCard(
                 p.isLivePhoto -> Text("检测到实况图 · 将合成为小米动态照片",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.primary)
-                // 识别到实况图作品但公开页没给动态片段：如实说明，不谎称会合成
-                p.livePhotoWork -> Text("已识别为实况图作品 · 静态帧与原声可下载；动态片段需在高级设置接入端点补齐",
+                // 本地合成动图：明确告诉用户「动图」栏里那一项下载后就是会动的文件
+                p.resources.any { it.isLocalCompose } ->
+                    Text("已识别动图 · 勾选「动图」即可下载本地合成的轮播 GIF / 小米动态照片",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.primary)
+                p.livePhotoWork -> Text("已识别为实况图作品 · 静态帧与原声可下载",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.primary)
             }
@@ -340,9 +344,11 @@ private fun RowScope.ResourceTile(
     // 缩略图限制解码尺寸：原图可达 1660×2142（解码后约 14MB/张），
     // 多张同时解码会引发大量 GC 造成滚动掉帧。缩略图只需 320px 级别。
     val ctx = LocalContext.current
-    val imageRequest = remember(r.url) {
+    // 本地合成动图的 url 是伪地址，缩略图用首帧直链
+    val thumb = r.thumbnailUrl.ifBlank { r.url }
+    val imageRequest = remember(thumb) {
         ImageRequest.Builder(ctx)
-            .data(r.url)
+            .data(thumb)
             .size(320)
             .crossfade(false)
             .build()
@@ -437,7 +443,7 @@ private fun PreviewDialog(r: MediaResource, onDismiss: () -> Unit) {
         } else {
             Box(Modifier.fillMaxSize().background(Color.Black)) {
                 AsyncImage(
-                    model = r.url,
+                    model = r.thumbnailUrl.ifBlank { r.url },
                     contentDescription = null,
                     contentScale = ContentScale.Fit,
                     modifier = Modifier.fillMaxSize()

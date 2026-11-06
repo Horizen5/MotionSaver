@@ -71,15 +71,16 @@ class LivePhotoAndSlidesTest {
     // ---------------------------------------------------------------- 实况图识别
 
     @Test
-    fun `实况图作品被识别为动态图且给出补齐指引`() {
+    fun `实况图作品被识别为动态图且可本地合成动图`() {
         val p = requireNotNull(parse("router_live.html")) { "应能解析实况图作品" }
         assertTrue("应标记为实况图作品", p.livePhotoWork)
         assertEquals(MediaType.LIVE_PHOTO, p.type)
         assertEquals(1, p.byKind(ResourceKind.IMAGE).size)
         assertNotNull("静态帧应作为实况封面", p.liveCover)
-        assertTrue(p.notes.any { it.contains("实况图") })
-        assertTrue(p.warnings.any { it.contains("动态视频片段") })
-        assertTrue(p.warnings.any { it.contains("解析端点") })
+        assertTrue(p.notes.any { it.contains("动图") })
+        assertTrue(p.warnings.any { it.contains("实况图作品") })
+        assertEquals("实况图也应产出可下载的动图", 1, p.localComposes.size)
+        assertEquals(1, p.localComposes.first().composeFrames.size)
     }
 
     @Test

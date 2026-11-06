@@ -47,15 +47,20 @@ object RouterDataParser {
         val audios = audioResources(item, images.isNotEmpty())
         if (images.isEmpty() && videos.isEmpty() && audios.isEmpty()) return null
 
-        val resources = renumber(images + videos + audios)
         val desc = Json.str(item["desc"]).ifBlank { Json.str(item["title"]) }
         val author = Json.str(Json.path(item, "author", "nickname"))
             .ifBlank { Json.str(item["nickname"]) }
         val itemId = Json.str(item["aweme_id"]).ifBlank { ShareLinkNormalizer.itemIdOf(sourceUrl) }
 
         // 实况图作品（Live Photo）：单张静态帧 + 原声，动态视频片段不在公开页里。
-        // 识别出来后明确标注，绝不把 M4A 音频伪装成视频、也不伪造小米动态照片。
         val liveWork = isLivePhotoWork(item, images)
+
+        // 公开分享页只暴露静态帧与原声，动态视频片段（MP4）不在公开数据里
+        // （实测 play_addr 为 ftypM4A 纯音频、bit_rate=null、image_infos=null）。
+        // 因此用这些合法取得的静态帧在设备本地编码出真正会动的动图：
+        // 多图 → 轮播动图；单图实况 → 轻微推镜动图 + 原声动态照片。
+        val animated = animatedResource(itemId, images, audios)
+        val resources = renumber(images + videos + audios + animated)
 
         val notes = mutableListOf<String>()
         notes.add("数据源：公开分享页访客渲染数据 _ROUTER_DATA.videoInfoRes")
@@ -67,12 +72,14 @@ object RouterDataParser {
         }
         if (videos.isNotEmpty()) notes.add("视频：已挑最高码率直链")
         if (audios.isNotEmpty()) notes.add("原声：单独列出，可勾选是否下载")
+        if (animated.isNotEmpty()) {
+            notes.add("已识别动图：可用 ${images.size} 张静态帧在本地合成轮播动图（GIF）与小米动态照片")
+            notes.add("动图为设备本地合成，不依赖平台私有接口或签名")
+        }
 
         val warnings = mutableListOf<String>()
         if (liveWork) {
-            notes.add("已识别为实况图（Live Photo）作品：静态帧采用实况专用 lqen 模板，配乐为 M4A 原声")
-            warnings.add("这是实况图作品，公开分享页只提供静态帧与原声，动态视频片段（MP4）未在公开数据中暴露。")
-            warnings.add("如需完整动态照片，请在「设置 → 高级设置 → 解析端点」接入自己的合规数据源，返回 cover 与 live_video 字段后会自动合成小米动态照片。")
+            warnings.add("实况图作品：公开分享页只提供静态帧与原声，平台原始实况视频片段未公开，动图由静态帧本地合成。")
         }
 
         val parsed = ParsedMedia(
@@ -90,8 +97,38 @@ object RouterDataParser {
             warnings = warnings,
             notes = notes
         )
-        // 实况图保持 LIVE_PHOTO 标签；否则按资源构成推断，避免被误标成「音频」
+        // 实况图保持 LIVE_PHOTO 标签；否则按资源构成推断，避免被误标成「音频」。
+        // 本地合成动图是 ANIMATED 资源，不参与主类型推断（主类型仍由原始资源决定）。
         return if (liveWork) parsed else parsed.copy(type = parsed.inferredType())
+    }
+
+    /**
+     * 生成本地合成动图资源。url 是伪地址（不可网络请求），
+     * [MediaResource.isLocalCompose] 为真时下载链路会走本地编码分支。
+     * 每帧携带自己的全部候选直链，下载时逐帧回退，避免签名过期导致整张动图失败。
+     */
+    private fun animatedResource(
+        itemId: String,
+        images: List<MediaResource>,
+        audios: List<MediaResource>
+    ): List<MediaResource> {
+        if (images.isEmpty()) return emptyList()
+        val key = itemId.ifBlank { images.first().url.hashCode().toString() }
+        return listOf(
+            MediaResource(
+                url = "motionsaver://compose/animated/$key",
+                mime = "image/gif",
+                kind = ResourceKind.ANIMATED,
+                label = if (images.size > 1) "动图 · ${images.size} 帧轮播" else "动图 · 实况动态",
+                index = 1,
+                qualityLabel = "本地合成 · 可下载",
+                isLocalCompose = true,
+                composeFrames = images.map { it.url },
+                composeAudio = audios.firstOrNull()?.url.orEmpty(),
+                thumbnailUrl = images.first().url,
+                headers = DEFAULT_HEADERS
+            )
+        )
     }
 
     /**
@@ -256,6 +293,8 @@ object RouterDataParser {
     private fun renumber(list: List<MediaResource>): List<MediaResource> {
         var i = 0
         return list.map { r ->
+            // 本地合成动图是附加产物，保留「动图 · N 帧轮播」这类说明性标签
+            if (r.isLocalCompose) return@map r
             if (r.kind == ResourceKind.IMAGE || r.kind == ResourceKind.ANIMATED) {
                 i++
                 r.copy(index = i, label = if (r.kind == ResourceKind.ANIMATED) "动图 $i" else "图 $i")

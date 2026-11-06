@@ -51,7 +51,21 @@ data class MediaResource(
     val width: Int = 0,
     val height: Int = 0,
     /** 画质说明，例如「原图 1080×778 · JPEG」 */
-    val qualityLabel: String = ""
+    val qualityLabel: String = "",
+
+    // ------------------------------------------------------------ 本地合成动图
+    /**
+     * 标记为「设备本地合成」资源：url 是伪地址，不参与网络下载。
+     * 公开分享页只暴露静态帧与原声，动态视频片段不在公开数据里，
+     * 因此用这些合法取得的静态帧在本地编码出真正会动的 GIF / 小米动态照片。
+     */
+    val isLocalCompose: Boolean = false,
+    /** 参与轮播合成的静态帧直链（按图集顺序） */
+    val composeFrames: List<String> = emptyList(),
+    /** 可选原声直链：合成动态照片时作为背景音轨 */
+    val composeAudio: String = "",
+    /** UI 缩略图直链：本地合成资源自身没有可加载的 URL，用首帧展示 */
+    val thumbnailUrl: String = ""
 ) {
     val isVideo: Boolean get() = kind == ResourceKind.VIDEO || kind == ResourceKind.LIVE_VIDEO
     val isAudio: Boolean get() = kind == ResourceKind.AUDIO
@@ -59,6 +73,7 @@ data class MediaResource(
         kind == ResourceKind.IMAGE || kind == ResourceKind.COVER || kind == ResourceKind.ANIMATED
 
     fun suggestedExtension(): String = when {
+        isLocalCompose -> "gif"
         isVideo -> "mp4"
         isAudio -> if (mime.contains("mpeg") || url.contains(".mp3")) "mp3" else "m4a"
         mime.contains("png") || url.contains(".png") -> "png"
@@ -100,9 +115,12 @@ data class ParsedMedia(
 
     fun byKind(kind: ResourceKind): List<MediaResource> = resources.filter { it.kind == kind }
 
-    val images: List<MediaResource> get() = resources.filter { it.isImage }
+    /** 可单独下载的静态图资源；本地合成动图是附加产物，不计入图集编号与命名。 */
+    val images: List<MediaResource> get() = resources.filter { it.isImage && !it.isLocalCompose }
     val videos: List<MediaResource> get() = resources.filter { it.isVideo }
     val audios: List<MediaResource> get() = resources.filter { it.isAudio }
+    /** 设备本地合成的动图资源（伪 URL，下载链路走本地编码分支）。 */
+    val localComposes: List<MediaResource> get() = resources.filter { it.isLocalCompose }
 
     /**
      * 主类型由资源构成推断。单张图 + 视频视为「视频作品」（那张图是封面），
@@ -113,7 +131,9 @@ data class ParsedMedia(
         val imgCount = byKind(ResourceKind.IMAGE).size
         val hasVid = byKind(ResourceKind.VIDEO).isNotEmpty()
         val hasAud = byKind(ResourceKind.AUDIO).isNotEmpty()
-        val hasAnim = byKind(ResourceKind.ANIMATED).isNotEmpty()
+        // 本地合成动图是「附加产物」，不参与主类型推断：
+        // 图文作品仍显示【图文】，但 UI 的「动图」分组里会多出一张可勾选卡片。
+        val hasAnim = byKind(ResourceKind.ANIMATED).any { !it.isLocalCompose }
         return when {
             hasVid && imgCount <= 1 && !hasAud && !hasAnim -> MediaType.VIDEO
             hasAud && !hasVid && imgCount <= 1 && !hasAnim -> MediaType.AUDIO
