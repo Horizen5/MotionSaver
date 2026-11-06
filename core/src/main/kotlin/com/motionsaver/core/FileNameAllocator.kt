@@ -58,6 +58,25 @@ object FileNameAllocator {
     fun allocateAuxiliary(title: String, tag: String, extension: String, existingNames: Set<String>): String =
         allocate("$title-$tag", extension, existingNames)
 
+    /**
+     * 动态照片专用命名，同时满足两代相册的识别条件：
+     *  - 小米 / Google Photos 老判定：`MVIMG_` 前缀；
+     *  - Android Motion Photo 1.0 正则 `^([^\s/\\][^/\\]*MP)\.(jpg|jpeg|...)$`：扩展名前以 `MP` 结尾。
+     * 真机样本名为 `MVIMG_20261106_230518.jpg`，缺前缀时相册常只显示静态封面。
+     */
+    fun allocateMotionPhoto(title: String, existingNames: Set<String>): String {
+        val base = TitleSanitizer.sanitize(title, TitleSanitizer.DEFAULT_MAX_LENGTH - 16)
+        // 重名序号必须放在 MP 之前，保证文件名始终以 MP.jpg 结尾（1.0 正则硬要求）
+        val stem = "MVIMG_${base}-动态照片"
+        var name = "${stem}MP.jpg"
+        var n = 2
+        while (name in existingNames) {
+            name = "$stem-${n}MP.jpg"
+            n++
+        }
+        return name
+    }
+
     private fun truncate(s: String, max: Int): String =
         if (s.codePointCount(0, s.length) <= max) s
         else s.substring(0, s.offsetByCodePoints(0, max.coerceAtLeast(1)))

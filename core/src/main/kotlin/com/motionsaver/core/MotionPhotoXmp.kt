@@ -27,6 +27,9 @@ object MotionPhotoXmp {
             append("    xmlns:GCamera=\"http://ns.google.com/photos/1.0/camera/\"\n")
             append("    xmlns:Container=\"http://ns.google.com/photos/1.0/container/\"\n")
             append("    xmlns:Item=\"http://ns.google.com/photos/1.0/container/item/\"\n")
+            // 真机样本（小米 MVIMG_*.jpg）带 MicroVideo="1"；缺少它时部分小米相册
+            // 会把文件当普通静态图，即使 MicroVideoOffset / Item:Length 都正确。
+            append("    GCamera:MicroVideo=\"1\"\n")
             append("    GCamera:MicroVideoVersion=\"1\"\n")
             append("    GCamera:MicroVideoOffset=\"").append(len).append("\"\n")
             append("    GCamera:MicroVideoPresentationTimestampUs=\"").append(ts).append("\"\n")

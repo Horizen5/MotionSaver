@@ -40,6 +40,7 @@ import com.motionsaver.core.MediaResource
 import com.motionsaver.core.MediaType
 import com.motionsaver.core.ParsedMedia
 import com.motionsaver.core.ResourceKind
+import kotlinx.coroutines.delay
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -203,8 +204,8 @@ private fun HomeScreen(state: MainUiState, vm: MainViewModel) {
                 HorizontalDivider(Modifier.padding(vertical = 6.dp))
                 Text("支持：${vm.supportedPlatforms}", style = MaterialTheme.typography.bodySmall)
                 Text(
-                    "点缩略图直接预览；右上角圆圈点一下选中、再点取消；选中卡片会浮起放大。" +
-                        "图集默认选最高质量 JPEG 原图，自动排除水印与缩放版本。",
+                    "点缩略图直接预览；动图点开就直接轮播、播完自动暂停；右上角圆圈点一下选中、再点取消。" +
+                        "记录页里的动态照片可在 App 内直接播放内嵌视频。图集默认选最高质量 JPEG 原图，自动排除水印与缩放版本。",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -422,41 +423,111 @@ private fun RowScope.ResourceTile(
     }
 }
 
-/** 点开直接看：图片内嵌全屏预览，视频/音频交给系统播放器。 */
+/** 点开直接看：动图轮播（播完自动暂停）、静态图全屏、视频/音频交给系统播放器。 */
 @Composable
 private fun PreviewDialog(r: MediaResource, onDismiss: () -> Unit) {
-    val ctx = LocalContext.current
-    val playable = r.isVideo || r.isAudio
     Dialog(
         onDismissRequest = onDismiss,
         properties = DialogProperties(usePlatformDefaultWidth = false)
     ) {
-        if (playable) {
-            LaunchedEffect(r.url) {
-                openExternal(ctx, r.url, if (r.isVideo) "video/*" else "audio/*")
-                onDismiss()
-            }
-            Box(Modifier.fillMaxSize().background(Color.Black),
-                contentAlignment = Alignment.Center) {
-                Text("正在打开播放器…", color = Color.White)
-            }
-        } else {
-            Box(Modifier.fillMaxSize().background(Color.Black)) {
-                AsyncImage(
-                    model = r.thumbnailUrl.ifBlank { r.url },
-                    contentDescription = null,
-                    contentScale = ContentScale.Fit,
-                    modifier = Modifier.fillMaxSize()
-                )
-                TextButton(onClick = onDismiss,
-                    modifier = Modifier.align(Alignment.TopEnd).padding(12.dp)) {
-                    Text("✕ 关闭", color = Color.White)
-                }
-                Text(r.qualityLabel.ifBlank { r.label }, color = Color.White,
-                    style = MaterialTheme.typography.bodySmall,
-                    modifier = Modifier.align(Alignment.BottomCenter).padding(16.dp))
+        when {
+            r.isLocalCompose && r.composeFrames.isNotEmpty() -> AnimatedFramesPreview(r, onDismiss)
+            r.isVideo || r.isAudio -> ExternalPlayerPreview(r, onDismiss)
+            else -> StaticImagePreview(r, onDismiss)
+        }
+    }
+}
+
+/**
+ * 本地合成动图预览：点开（或点画面）就按帧轮播，播完一轮自动暂停、不循环。
+ * 帧本来就是公开页合法取得的静态原图直链，预览无需先编码 GIF，点一下立刻就能动。
+ */
+@Composable
+private fun AnimatedFramesPreview(r: MediaResource, onDismiss: () -> Unit) {
+    val ctx = LocalContext.current
+    val frames = r.composeFrames
+    // 整轮控制在 2~4 秒：3 帧约 2.7s，9 帧约 3.6s，观感接近真机动态照片
+    val perFrameMs = (3600L / frames.size.coerceAtLeast(1)).coerceIn(200L, 900L)
+    var frame by remember(frames) { mutableStateOf(0) }
+    var playing by remember(frames) { mutableStateOf(false) }
+    var finished by remember(frames) { mutableStateOf(false) }
+
+    LaunchedEffect(playing, frames) {
+        if (!playing) return@LaunchedEffect
+        finished = false
+        frame = 0
+        for (i in frames.indices) {
+            frame = i
+            delay(perFrameMs)
+        }
+        // 只播一次：结束后停在最后一帧，即「播放完就暂停」
+        playing = false
+        finished = true
+    }
+
+    Box(Modifier.fillMaxSize().background(Color.Black)) {
+        AsyncImage(
+            model = remember(frames, frame) {
+                ImageRequest.Builder(ctx).data(frames[frame]).crossfade(false).build()
+            },
+            contentDescription = null,
+            contentScale = ContentScale.Fit,
+            modifier = Modifier.fillMaxSize().clickable { playing = true }
+        )
+        TextButton(
+            onClick = onDismiss,
+            modifier = Modifier.align(Alignment.TopEnd).padding(12.dp)
+        ) { Text("✕ 关闭", color = Color.White) }
+        Row(
+            Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                when {
+                    playing -> "播放中 · 第 ${frame + 1}/${frames.size} 帧"
+                    finished -> "播放完毕 · 已暂停（停在最后一帧）"
+                    else -> "▶ 点画面播放动图 · ${frames.size} 帧轮播"
+                },
+                color = Color.White,
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.weight(1f)
+            )
+            TextButton(onClick = { playing = true }) {
+                Text(if (finished) "↻ 再播一次" else "▶ 播放", color = Color.White)
             }
         }
+    }
+}
+
+@Composable
+private fun ExternalPlayerPreview(r: MediaResource, onDismiss: () -> Unit) {
+    val ctx = LocalContext.current
+    LaunchedEffect(r.url) {
+        openExternal(ctx, r.url, if (r.isVideo) "video/*" else "audio/*")
+        onDismiss()
+    }
+    Box(Modifier.fillMaxSize().background(Color.Black),
+        contentAlignment = Alignment.Center) {
+        Text("正在打开播放器…", color = Color.White)
+    }
+}
+
+@Composable
+private fun StaticImagePreview(r: MediaResource, onDismiss: () -> Unit) {
+    Box(Modifier.fillMaxSize().background(Color.Black)) {
+        AsyncImage(
+            model = r.thumbnailUrl.ifBlank { r.url },
+            contentDescription = null,
+            contentScale = ContentScale.Fit,
+            modifier = Modifier.fillMaxSize()
+        )
+        TextButton(onClick = onDismiss,
+            modifier = Modifier.align(Alignment.TopEnd).padding(12.dp)) {
+            Text("✕ 关闭", color = Color.White)
+        }
+        Text(r.qualityLabel.ifBlank { r.label }, color = Color.White,
+            style = MaterialTheme.typography.bodySmall,
+            modifier = Modifier.align(Alignment.BottomCenter).padding(16.dp))
     }
 }
 
@@ -528,6 +599,8 @@ private fun QueueCard(q: QueueItem) {
 @Composable
 private fun HistoryScreen(state: MainUiState, vm: MainViewModel) {
     val ctx = LocalContext.current
+    // 动态照片走 App 内无损播放（读 XMP 定位尾部 MP4），其余仍交给系统相册
+    var motionPreview by remember { mutableStateOf<Uri?>(null) }
     Column(Modifier.fillMaxSize()) {
         Row(
             Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
@@ -547,12 +620,24 @@ private fun HistoryScreen(state: MainUiState, vm: MainViewModel) {
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 items(state.history) { e ->
-                    HistoryCard(e, fmt) { openSaved(ctx, e) }
+                    HistoryCard(e, fmt) {
+                        if (isMotionPhotoEntry(e) && e.previewUri.isNotBlank()) {
+                            motionPreview = Uri.parse(e.previewUri)
+                        } else {
+                            openSaved(ctx, e)
+                        }
+                    }
                 }
             }
         }
     }
+    motionPreview?.let { u -> LocalMotionPhotoDialog(u) { motionPreview = null } }
 }
+
+/** 文件名带 MVIMG_ 前缀或「动态照片」字样的，视为动态照片，走 App 内播放。 */
+private fun isMotionPhotoEntry(e: HistoryEntry): Boolean =
+    e.mime.startsWith("image/") &&
+        (e.fileName.startsWith("MVIMG_", ignoreCase = true) || e.fileName.contains("动态照片"))
 
 @Composable
 private fun HistoryCard(e: HistoryEntry, fmt: SimpleDateFormat, onOpen: () -> Unit) {

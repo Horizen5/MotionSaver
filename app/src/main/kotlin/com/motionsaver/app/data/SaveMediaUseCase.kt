@@ -218,7 +218,8 @@ class SaveMediaUseCase(
                     result.motionPhoto?.let {
                         Triple(
                             it,
-                            FileNameAllocator.allocateAuxiliary(parsed.title, "动态照片", "jpg", used),
+                            // MVIMG_ 前缀 + MP 结尾：小米相册与 Android 1.0 都能识别为动态照片
+                            FileNameAllocator.allocateMotionPhoto(parsed.title, used),
                             "image/jpeg"
                         )
                     }
@@ -268,7 +269,7 @@ class SaveMediaUseCase(
                 val report = MotionPhotoVerifier.verify(composed.bytes)
                 if (!report.valid) error("自检失败：${report.problems.joinToString()}")
 
-                val name = FileNameAllocator.allocate(parsed.title, "jpg", used)
+                val name = FileNameAllocator.allocateMotionPhoto(parsed.title, used)
                 val out = File(cache, name).apply { writeBytes(composed.bytes) }
                 val location = saver.save(out, name, "image/jpeg", SaveCategory.IMAGE)
                 used.add(name)

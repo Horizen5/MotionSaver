@@ -12,8 +12,8 @@ android {
         applicationId = "com.motionsaver.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 6
-        versionName = "2.4.0"
+        versionCode = 7
+        versionName = "2.5.0"
 
         // 只打 arm64-v8a：近五年机型全覆盖，包体最小、无 32 位兼容损耗
         ndk { abiFilters += listOf("arm64-v8a") }
