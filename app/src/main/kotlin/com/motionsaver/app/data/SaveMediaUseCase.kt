@@ -94,6 +94,9 @@ class SaveMediaUseCase(
         }
         val cache = File(context.cacheDir, "ms_dl").apply { mkdirs() }
         val used = existing.toMutableSet()
+        // 落盘名带稳定短码去重；UI 上显示的仍是干净的 parsed.title（文案/话题）。
+        // 这样即便两个作品话题完全相同，文件名也不会互相覆盖、堆叠。
+        val fileTitle = FileNameAllocator.scopedTitle(parsed.title, parsed.itemId, parsed.sourceUrl)
         val saved = mutableListOf<SavedFile>()
         val failures = mutableListOf<String>()
 
@@ -110,7 +113,7 @@ class SaveMediaUseCase(
             val label = r.label.ifBlank { "资源 ${i + 1}" }
             try {
                 val ext = r.suggestedExtension()
-                val name = nameFor(parsed.title, r, ext, imageCount, used)
+                val name = nameFor(fileTitle, r, ext, imageCount, used)
                 val tmp = File(cache, "dl_$id.$ext")
                 downloader.download(listOf(r.url) + r.alternatives, r.headers, tmp, label) { p ->
                     onEvent(
@@ -123,7 +126,7 @@ class SaveMediaUseCase(
 
                 // 用户勾选「提取音频」时，从视频无损抽音轨
                 if (settings.extractAudioFromVideo && r.kind == ResourceKind.VIDEO) {
-                    val audioName = FileNameAllocator.allocateAuxiliary(parsed.title, "原声", "m4a", used)
+                    val audioName = FileNameAllocator.allocateAuxiliary(fileTitle, "原声", "m4a", used)
                     val audio = AudioExtractor.extract(tmp, File(cache, "audio_$id"))
                     if (audio != null) {
                         val loc = saver.save(audio.file, audioName, "audio/mp4", SaveCategory.AUDIO)
@@ -211,7 +214,7 @@ class SaveMediaUseCase(
                     result.gif?.let {
                         Triple(
                             it,
-                            FileNameAllocator.allocateAuxiliary(parsed.title, "动图", "gif", used),
+                            FileNameAllocator.allocateAuxiliary(fileTitle, "动图", "gif", used),
                             "image/gif"
                         )
                     },
@@ -219,7 +222,7 @@ class SaveMediaUseCase(
                         Triple(
                             it,
                             // MVIMG_ 前缀 + MP 结尾：小米相册与 Android 1.0 都能识别为动态照片
-                            FileNameAllocator.allocateMotionPhoto(parsed.title, used),
+                            FileNameAllocator.allocateMotionPhoto(fileTitle, used),
                             "image/jpeg"
                         )
                     }
@@ -269,7 +272,7 @@ class SaveMediaUseCase(
                 val report = MotionPhotoVerifier.verify(composed.bytes)
                 if (!report.valid) error("自检失败：${report.problems.joinToString()}")
 
-                val name = FileNameAllocator.allocateMotionPhoto(parsed.title, used)
+                val name = FileNameAllocator.allocateMotionPhoto(fileTitle, used)
                 val out = File(cache, name).apply { writeBytes(composed.bytes) }
                 val location = saver.save(out, name, "image/jpeg", SaveCategory.IMAGE)
                 used.add(name)
@@ -296,7 +299,7 @@ class SaveMediaUseCase(
         // 3) 图文正文单独存一份 .txt
         if (settings.saveCaption && parsed.caption.isNotBlank()) {
             try {
-                val name = FileNameAllocator.allocateAuxiliary(parsed.title, "正文", "txt", used)
+                val name = FileNameAllocator.allocateAuxiliary(fileTitle, "正文", "txt", used)
                 val f = File(cache, name).apply { writeText(parsed.caption, Charsets.UTF_8) }
                 val location = saver.save(f, name, "text/plain", SaveCategory.TEXT)
                 used.add(name)

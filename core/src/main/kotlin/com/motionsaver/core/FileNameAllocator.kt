@@ -6,6 +6,23 @@ package com.motionsaver.core
  */
 object FileNameAllocator {
 
+    /**
+     * 给落盘标题附加一个稳定的「作品短码」，避免不同作品同名互相覆盖。
+     *
+     * 用户反馈「很多图片重叠到一块」：此前所有纯话题作品标题都退化成
+     * 「抖音作品」，多张图按 `抖音作品_01.jpg` 命名，不同作品下载后
+     * 在相册里堆叠、甚至被去重逻辑判成同名。做法遵循通用文件命名实践
+     * 「语义化主体 + 短 hash 保证唯一」：短码取自作品 ID（没有则用链接），
+     * 同一作品恒定、不同作品几乎必不相同，且不影响 UI 显示的干净标题。
+     */
+    fun scopedTitle(title: String, itemId: String, sourceUrl: String): String {
+        val seed = itemId.ifBlank { sourceUrl }
+        if (seed.isBlank()) return title
+        val code = (seed.hashCode().toLong() and 0xFFFFFFL)
+            .toString(16).uppercase().padStart(6, '0')
+        return "$title-$code"
+    }
+
     fun allocate(
         title: String,
         extension: String,

@@ -29,7 +29,7 @@ enum class MediaType(val label: String) {
     IMAGE_TEXT("图文"),
     VIDEO("视频"),
     AUDIO("音频"),
-    LIVE_PHOTO("动态图"),
+    LIVE_PHOTO("实况图"),
     ANIMATED("动图"),
     MIXED("混合")
 }
@@ -136,10 +136,11 @@ data class ParsedMedia(
         val hasAnim = byKind(ResourceKind.ANIMATED).any { !it.isLocalCompose }
         return when {
             hasVid && imgCount <= 1 && !hasAud && !hasAnim -> MediaType.VIDEO
-            hasAud && !hasVid && imgCount <= 1 && !hasAnim -> MediaType.AUDIO
             hasAnim && !hasVid && imgCount == 0 -> MediaType.ANIMATED
-            // 图文作品常附带原声 BGM，主类型仍应是「图文」，不要误标成「混合」
+            // 有静态图就是图文作品：哪怕只带一段原声 BGM，也不误标成「音频」。
+            // 用户反馈的单图+原声作品此前被当成「音频/动态图」，这里统一修正。
             !hasVid && !hasAnim && imgCount > 0 -> MediaType.IMAGE_TEXT
+            hasAud && !hasVid && imgCount == 0 && !hasAnim -> MediaType.AUDIO
             !hasVid && !hasAud && !hasAnim && imgCount == 0 -> type
             else -> MediaType.MIXED
         }

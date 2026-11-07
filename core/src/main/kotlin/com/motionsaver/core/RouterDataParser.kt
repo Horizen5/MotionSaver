@@ -53,12 +53,13 @@ object RouterDataParser {
         val itemId = Json.str(item["aweme_id"]).ifBlank { ShareLinkNormalizer.itemIdOf(sourceUrl) }
 
         // 实况图作品（Live Photo）：单张静态帧 + 原声，动态视频片段不在公开页里。
+        // 仅作为「提示」保留，不再据此把主类型误标成「动态图」。
         val liveWork = isLivePhotoWork(item, images)
 
         // 公开分享页只暴露静态帧与原声，动态视频片段（MP4）不在公开数据里
         // （实测 play_addr 为 ftypM4A 纯音频、bit_rate=null、image_infos=null）。
-        // 因此用这些合法取得的静态帧在设备本地编码出真正会动的动图：
-        // 多图 → 轮播动图；单图实况 → 轻微推镜动图 + 原声动态照片。
+        // 只有「多张静态帧」才有足够信息做真正会动的轮播 GIF；单张静态图
+        // 没有第二帧，绝不凭空造动图 —— 避免把普通图文误报成「有动图」。
         val animated = animatedResource(itemId, images, audios)
         val resources = renumber(images + videos + audios + animated)
 
@@ -73,18 +74,20 @@ object RouterDataParser {
         if (videos.isNotEmpty()) notes.add("视频：已挑最高码率直链")
         if (audios.isNotEmpty()) notes.add("原声：单独列出，可勾选是否下载")
         if (animated.isNotEmpty()) {
-            notes.add("已识别动图：可用 ${images.size} 张静态帧在本地合成轮播动图（GIF）与小米动态照片")
-            notes.add("动图为设备本地合成，不依赖平台私有接口或签名")
+            notes.add("多图轮播：可将 ${images.size} 张静态帧在设备本地合成为轮播 GIF 与小米动态照片（非平台原生动图）")
+            notes.add("轮播动图为设备本地合成，不依赖平台私有接口或签名")
         }
 
         val warnings = mutableListOf<String>()
         if (liveWork) {
-            warnings.add("实况图作品：公开分享页只提供静态帧与原声，平台原始实况视频片段未公开，动图由静态帧本地合成。")
+            // 单张静态帧 + 原声的「实况图」作品：公开页未暴露动态视频片段，
+            // 明确告知用户「本作品没有可下载的动图」，不再把它标成动态图类型。
+            warnings.add("单张图文作品：公开分享页只提供静态帧与原声，未暴露动态视频片段；本作品不含可下载的动图。")
         }
 
         val parsed = ParsedMedia(
             platform = platform,
-            type = if (liveWork) MediaType.LIVE_PHOTO else MediaType.MIXED,
+            type = MediaType.MIXED,
             title = mainTitle(desc).ifBlank { defaultTitle },
             author = author,
             caption = desc,
@@ -97,14 +100,19 @@ object RouterDataParser {
             warnings = warnings,
             notes = notes
         )
-        // 实况图保持 LIVE_PHOTO 标签；否则按资源构成推断，避免被误标成「音频」。
-        // 本地合成动图是 ANIMATED 资源，不参与主类型推断（主类型仍由原始资源决定）。
-        return if (liveWork) parsed else parsed.copy(type = parsed.inferredType())
+        // 主类型一律按「真实资源构成」推断：单张静态图 + 原声 = 图文，
+        // 绝不因实况模板把作品标成 LIVE_PHOTO（其标签「动态图」会造成
+        // 「其实并没有动图，软件却说有」的假识别）。
+        return parsed.copy(type = parsed.inferredType())
     }
 
     /**
-     * 生成本地合成动图资源。url 是伪地址（不可网络请求），
+     * 生成「多图轮播动图」资源。url 是伪地址（不可网络请求），
      * [MediaResource.isLocalCompose] 为真时下载链路会走本地编码分支。
+     *
+     * 只有 ≥2 张静态帧才产出：单张静态图没有第二帧可轮播，作品本身也
+     * 不含任何动态片段（实测 play_addr 为 M4A 纯音频），此时若仍显示
+     * 「动图」就是假识别 —— 用户明确反馈「其实并没有 GIF 动态图」。
      * 每帧携带自己的全部候选直链，下载时逐帧回退，避免签名过期导致整张动图失败。
      */
     private fun animatedResource(
@@ -112,16 +120,16 @@ object RouterDataParser {
         images: List<MediaResource>,
         audios: List<MediaResource>
     ): List<MediaResource> {
-        if (images.isEmpty()) return emptyList()
+        if (images.size < 2) return emptyList()
         val key = itemId.ifBlank { images.first().url.hashCode().toString() }
         return listOf(
             MediaResource(
                 url = "motionsaver://compose/animated/$key",
                 mime = "image/gif",
                 kind = ResourceKind.ANIMATED,
-                label = if (images.size > 1) "动图 · ${images.size} 帧轮播" else "动图 · 实况动态",
+                label = "轮播动图 · ${images.size} 帧合成",
                 index = 1,
-                qualityLabel = "本地合成 · 可下载",
+                qualityLabel = "本地合成 · 非平台动图",
                 isLocalCompose = true,
                 composeFrames = images.map { it.url },
                 composeAudio = audios.firstOrNull()?.url.orEmpty(),
@@ -283,12 +291,19 @@ object RouterDataParser {
         return l.contains(".jpeg") || l.contains(".jpg")
     }
 
-    private fun mainTitle(desc: String): String = desc
-        .replace(Regex("""#[^\s#]*"""), " ")
-        .replace(Regex("""\s+"""), " ")
-        .trim()
-        .trimEnd('。', '，', ',', '.', '、', '；', ';', '!', '！', '?', '？', ' ')
-        .take(120)
+    private fun mainTitle(desc: String): String {
+        // 正常文案：去掉话题符号后保留正文（保持既有标题断言不变）。
+        val plain = desc
+            .replace(Regex("""#[^\s#]*"""), " ")
+            .replace(Regex("""\s+"""), " ")
+            .trim()
+            .trimEnd('。', '，', ',', '.', '、', '；', ';', '!', '！', '?', '？', ' ')
+            .take(120)
+        if (plain.isNotBlank()) return plain
+        // 纯话题文案（如「# 崩坏星穹铁道 # 流萤」）：用话题词做名字，
+        // 而不是把标题清空、退化成硬编码的「抖音作品」。
+        return WorkTitle.topics(desc).ifBlank { "" }
+    }
 
     private fun renumber(list: List<MediaResource>): List<MediaResource> {
         var i = 0

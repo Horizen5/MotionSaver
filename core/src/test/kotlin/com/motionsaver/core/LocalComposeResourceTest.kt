@@ -53,11 +53,15 @@ class LocalComposeResourceTest {
     }
 
     @Test
-    fun `实况图单图作品同样产出动图资源`() {
+    fun `单图实况作品不再误报动图`() {
+        // 用户明确反馈「这个其实并没有 GIF 的动态图，软件却识别到有」：
+        // 单张静态图没有第二帧可轮播，绝不该凭空造动图。
         val p = requireNotNull(parse("router_live.html"))
-        assertEquals(1, p.localComposes.size)
-        assertEquals(1, p.localComposes.first().composeFrames.size)
-        assertTrue(p.notes.any { it.contains("本地合成") })
+        assertTrue("单图作品不该出现动图资源", p.localComposes.isEmpty())
+        assertTrue("单图作品不该出现动图分组", p.byKind(ResourceKind.ANIMATED).isEmpty())
+        assertNotEquals("单图实况不该被标成动态图/实况图类型", MediaType.LIVE_PHOTO, p.type)
+        assertEquals("单图+原声应回归图文", MediaType.IMAGE_TEXT, p.type)
+        assertTrue(p.warnings.any { it.contains("不含可下载的动图") })
     }
 
     @Test

@@ -55,6 +55,23 @@ object ShareText {
             .take(limit)
             .toList()
 
+    /**
+     * 把整段口令按链接切成 N 个「分享片段」，每段 = 该作品的引导文案/话题 + 一个链接。
+     *
+     * 旧版 parseAll 只把纯 URL 传给解析器，口令里的 `#话题`、文案全被丢掉，
+     * 于是标题永远回退成「抖音作品」，不同作品下载后文件名堆叠在一起。
+     * 保留每段的文案后，[WorkTitle] 就能为每条链接生成它自己的语义化标题。
+     * 单条口令原样返回（含完整文案），不改动 [extractUrl] 的行为。
+     */
+    fun splitShares(text: String): List<String> {
+        val matches = URL.findAll(text).toList()
+        if (matches.size <= 1) return listOf(text)
+        return matches.mapIndexed { i, m ->
+            val start = if (i == 0) 0 else matches[i - 1].range.last + 1
+            text.substring(start, m.range.last + 1).trim()
+        }.filter { it.isNotBlank() && URL.containsMatchIn(it) }
+    }
+
     /** 去掉链接与口令噪音后剩下的文字，可作为标题兜底。 */
     fun extractTitleFallback(text: String): String =
         text.replace(URL, " ")

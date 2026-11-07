@@ -71,16 +71,17 @@ class LivePhotoAndSlidesTest {
     // ---------------------------------------------------------------- 实况图识别
 
     @Test
-    fun `实况图作品被识别为动态图且可本地合成动图`() {
+    fun `单图实况作品不再被误标成动态图也不伪造动图`() {
         val p = requireNotNull(parse("router_live.html")) { "应能解析实况图作品" }
-        assertTrue("应标记为实况图作品", p.livePhotoWork)
-        assertEquals(MediaType.LIVE_PHOTO, p.type)
+        assertTrue("仍标记为实况图作品（仅作提示）", p.livePhotoWork)
+        // 用户反馈：单张静态图 + 原声的作品「其实并没有动图」，
+        // 主类型不能叫「动态图」，也不该凭空造一张动图资源。
+        assertNotEquals("不该被标成动态图/实况图类型", MediaType.LIVE_PHOTO, p.type)
+        assertEquals(MediaType.IMAGE_TEXT, p.type)
         assertEquals(1, p.byKind(ResourceKind.IMAGE).size)
-        assertNotNull("静态帧应作为实况封面", p.liveCover)
-        assertTrue(p.notes.any { it.contains("动图") })
-        assertTrue(p.warnings.any { it.contains("实况图作品") })
-        assertEquals("实况图也应产出可下载的动图", 1, p.localComposes.size)
-        assertEquals(1, p.localComposes.first().composeFrames.size)
+        assertNotNull("静态帧仍作为实况封面", p.liveCover)
+        assertTrue("单图不产出动图", p.localComposes.isEmpty())
+        assertTrue(p.warnings.any { it.contains("不含可下载的动图") })
     }
 
     @Test
@@ -101,10 +102,12 @@ class LivePhotoAndSlidesTest {
     }
 
     @Test
-    fun `m 站实况图数据同样能识别`() {
+    fun `m 站实况图数据同样能识别但不误报动图`() {
         val p = requireNotNull(parse("router_live_m.html")) { "m 站数据也应能解析" }
         assertTrue(p.livePhotoWork)
-        assertEquals(MediaType.LIVE_PHOTO, p.type)
+        assertNotEquals("m 站单图实况也不该标成动态图", MediaType.LIVE_PHOTO, p.type)
+        assertEquals(MediaType.IMAGE_TEXT, p.type)
+        assertTrue("m 站单图也不产出动图", p.localComposes.isEmpty())
         assertFalse(p.isLivePhoto)
     }
 

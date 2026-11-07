@@ -412,8 +412,12 @@ abstract class PublicPageParser : MediaParser {
     ): ParsedMedia {
         val url = ShareLinkNormalizer.urlOf(shareText)
             ?: throw ParseException("分享文本中未找到链接")
+        // 口令里的 #话题 / 文案是最可靠的标题来源：公开页 SSR 常拿不到 desc
+        // （本次实测 item_list 为空壳），旧版因此全部退化成「抖音作品」。
+        val shareTitle = WorkTitle.fromShare(shareText)
+        val effectiveDefault = shareTitle.ifBlank { defaultTitle }
         val snap = fetchForParsing(
-            ShareLinkNormalizer.normalize(url), fetcher, platform, defaultTitle
+            ShareLinkNormalizer.normalize(url), fetcher, platform, effectiveDefault
         )
         // 访客渲染数据已按明确字段给出四类资源，直接采用：
         // 不再走全文链接扫描，从根上避免把「相关推荐」作品页误判成可下载视频
@@ -427,10 +431,16 @@ abstract class PublicPageParser : MediaParser {
         val ld = snap.jsonLd
         val html = page.text()
 
-        // 结构化数据的标题/作者/正文最干净，优先于 meta 与口令兜底
-        val title = ld.title.ifBlank { extractTitle(html) }.ifBlank {
-            ShareText.extractTitleFallback(shareText).ifBlank { defaultTitle }
-        }
+        // 标题优先级：页面结构化标题（最真实，但排除「抖音/记录美好生活」等
+        // 平台通用词）> 口令语义名（话题/文案）> 口令清洗兜底 > 平台默认名。
+        // 页面有真实文案时以页面为准；页面是空壳 / 通用词时（本次用户反馈的场景）
+        // 才用口令里的 #话题 命名，避免所有作品都退化成「抖音作品」。
+        val pageTitle = ld.title.ifBlank { extractTitle(html) }
+        val title = pageTitle.takeIf { it.isNotBlank() && !WorkTitle.isGeneric(it) }.orEmpty()
+            .ifBlank { shareTitle }
+            .ifBlank { ShareText.extractTitleFallback(shareText) }
+            .ifBlank { pageTitle }
+            .ifBlank { defaultTitle }
         val author = ld.author.ifBlank { extractAuthor(html) }
         val caption = ld.description.ifBlank { extractCaption(html) }
 

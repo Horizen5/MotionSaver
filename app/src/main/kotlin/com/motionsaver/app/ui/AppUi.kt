@@ -6,24 +6,29 @@ import android.net.Uri
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -45,7 +50,7 @@ import java.text.SimpleDateFormat
 import java.util.*
 
 private val Scrim = Color(0x66000000)
-private val TAB_LABELS = listOf("解析下载", "队列", "记录", "设置")
+private val TAB_LABELS = listOf("解析", "队列", "记录", "设置")
 private val TAB_ICONS = listOf("↓", "≡", "◷", "⚙")
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -72,34 +77,96 @@ fun AppRoot(
         if (!initialSharedText.isNullOrBlank()) vm.onInputChange(initialSharedText)
     }
 
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text("动态存 · MotionSaver", fontWeight = FontWeight.SemiBold) },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.primaryContainer
-                )
-            )
-        },
-        bottomBar = {
-            NavigationBar {
-                TAB_LABELS.forEachIndexed { i, label ->
-                    NavigationBarItem(
-                        selected = tab == i,
-                        onClick = { tab = i },
-                        label = { Text(label) },
-                        icon = { Text(TAB_ICONS[i]) }
+    val dark = isSystemInDarkTheme()
+    // 全屏彩色光晕作「壁纸」，上面的顶栏 / 卡片 / 底栏是半透明柔光玻璃，
+    // 形成 HyperOS 4 要求的 ≥2 层玻璃层次；静态绘制，不逐帧模糊。
+    Box(Modifier.fillMaxSize()) {
+        Glass.GlowBackground(dark)
+        Scaffold(
+            containerColor = Color.Transparent,
+            contentColor = Glass.onGlass(dark),
+            topBar = {
+                TopAppBar(
+                    title = {
+                        Column {
+                            Text(
+                                "动态存",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 22.sp,
+                                color = Glass.onGlass(dark)
+                            )
+                            Text(
+                                "MotionSaver · 图文 / 视频 / 音频 / 动图",
+                                fontSize = 11.sp,
+                                color = Glass.onGlassSub(dark)
+                            )
+                        }
+                    },
+                    colors = TopAppBarDefaults.topAppBarColors(
+                        containerColor = Color.Transparent,
+                        titleContentColor = Glass.onGlass(dark)
                     )
+                )
+            },
+            bottomBar = { GlassNavBar(dark, tab) { tab = it } }
+        ) { padding ->
+            Box(Modifier.padding(padding).fillMaxSize()) {
+                when (tab) {
+                    0 -> HomeScreen(state, vm)
+                    1 -> QueueScreen(state)
+                    2 -> HistoryScreen(state, vm)
+                    else -> SettingsScreen(state, vm)
                 }
             }
         }
-    ) { padding ->
-        Surface(Modifier.padding(padding).fillMaxSize()) {
-            when (tab) {
-                0 -> HomeScreen(state, vm)
-                1 -> QueueScreen(state)
-                2 -> HistoryScreen(state, vm)
-                else -> SettingsScreen(state, vm)
+    }
+}
+
+/** 胶囊形柔光玻璃底栏：选中项是主题色玻璃胶囊，未选中透明。 */
+@Composable
+private fun GlassNavBar(dark: Boolean, tab: Int, onSelect: (Int) -> Unit) {
+    Box(
+        Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp)
+    ) {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .shadow(16.dp, Glass.PillShape, clip = false, ambientColor = Color(0x1A000000))
+                .glassSurface(dark, shape = Glass.PillShape)
+                .padding(horizontal = 8.dp, vertical = 8.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            TAB_LABELS.forEachIndexed { i, label ->
+                val selected = tab == i
+                Row(
+                    Modifier
+                        .weight(1f)
+                        .clip(Glass.PillShape)
+                        .background(
+                            if (selected) Glass.accentBrush else Brush.linearGradient(
+                                listOf(Color.Transparent, Color.Transparent)
+                            ),
+                            Glass.PillShape
+                        )
+                        .clickable { onSelect(i) }
+                        .padding(vertical = 9.dp),
+                    horizontalArrangement = Arrangement.Center,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        TAB_ICONS[i],
+                        color = if (selected) Color.White else Glass.onGlassSub(dark),
+                        fontSize = 14.sp
+                    )
+                    Spacer(Modifier.width(5.dp))
+                    Text(
+                        label,
+                        color = if (selected) Color.White else Glass.onGlassSub(dark),
+                        fontSize = 12.sp,
+                        fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal
+                    )
+                }
             }
         }
     }
@@ -129,8 +196,13 @@ private fun HomeScreen(state: MainUiState, vm: MainViewModel) {
     ) {
         item(key = "input_header") {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("粘贴分享链接（可一次贴多条）", Modifier.weight(1f),
-                    style = MaterialTheme.typography.titleMedium)
+                Column(Modifier.weight(1f)) {
+                    Text("粘贴分享链接", style = MaterialTheme.typography.titleMedium,
+                        color = Glass.onGlass(isSystemInDarkTheme()))
+                    Text("可一次贴多条口令 · 自动用话题 / 文案命名",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = Glass.onGlassSub(isSystemInDarkTheme()))
+                }
                 TextButton(
                     onClick = onClearAll,
                     enabled = state.input.isNotEmpty() || state.results.isNotEmpty()
@@ -139,29 +211,67 @@ private fun HomeScreen(state: MainUiState, vm: MainViewModel) {
         }
 
         item(key = "input_field") {
-            OutlinedTextField(
-                value = state.input,
-                onValueChange = vm::onInputChange,
-                modifier = Modifier.fillMaxWidth().heightIn(min = 100.dp),
-                placeholder = { Text("抖音 / 小红书 / 任意网页链接，可粘贴 2~3 条整段口令") },
-                enabled = !state.isAnalyzing && !state.isDownloading,
-                maxLines = 8
-            )
+            val dark = isSystemInDarkTheme()
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .shadow(10.dp, Glass.CardShape, clip = false, ambientColor = Color(0x14000000))
+                    .glassSurface(dark, shape = Glass.CardShape)
+            ) {
+                OutlinedTextField(
+                    value = state.input,
+                    onValueChange = vm::onInputChange,
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 100.dp).padding(4.dp),
+                    placeholder = { Text("抖音 / 小红书 / 任意网页链接，可粘贴 2~3 条整段口令",
+                        color = Glass.onGlassSub(dark)) },
+                    enabled = !state.isAnalyzing && !state.isDownloading,
+                    maxLines = 8,
+                    shape = Glass.CardShape,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = Color.Transparent,
+                        unfocusedBorderColor = Color.Transparent,
+                        disabledBorderColor = Color.Transparent,
+                        focusedContainerColor = Color.Transparent,
+                        unfocusedContainerColor = Color.Transparent,
+                        focusedTextColor = Glass.onGlass(dark),
+                        unfocusedTextColor = Glass.onGlass(dark)
+                    )
+                )
+            }
         }
 
         item(key = "action_row") {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(
-                    onClick = onAnalyze,
-                    modifier = Modifier.weight(1f),
-                    enabled = !state.isAnalyzing && !state.isDownloading
-                ) { Text(if (state.isAnalyzing) "解析中…" else "① 解析") }
-
-                Button(
-                    onClick = onDownload,
-                    modifier = Modifier.weight(1f),
-                    enabled = state.results.isNotEmpty() && !state.isDownloading
-                ) { Text(if (state.isDownloading) "下载中…" else "② 下载选中 ${state.selectedIds.size}") }
+            val dark = isSystemInDarkTheme()
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                // 胶囊渐变主按钮：柔和大阴影 + 主题色渐变，HyperOS 胶囊哲学
+                Box(
+                    Modifier
+                        .weight(1f)
+                        .height(50.dp)
+                        .shadow(14.dp, Glass.PillShape, clip = false,
+                            ambientColor = Glass.Accent.copy(alpha = 0.35f),
+                            spotColor = Glass.Accent.copy(alpha = 0.35f))
+                        .background(Glass.accentBrush, Glass.PillShape)
+                        .clip(Glass.PillShape)
+                        .clickable(enabled = !state.isAnalyzing && !state.isDownloading) { onAnalyze() },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(if (state.isAnalyzing) "解析中…" else "① 解析",
+                        color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                }
+                Box(
+                    Modifier
+                        .weight(1f)
+                        .height(50.dp)
+                        .shadow(10.dp, Glass.PillShape, clip = false, ambientColor = Color(0x14000000))
+                        .background(Glass.accentBrushMint, Glass.PillShape)
+                        .clip(Glass.PillShape)
+                        .clickable(enabled = state.results.isNotEmpty() && !state.isDownloading) { onDownload() },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(if (state.isDownloading) "下载中…" else "② 下载选中 ${state.selectedIds.size}",
+                        color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                }
             }
         }
 
@@ -179,15 +289,20 @@ private fun HomeScreen(state: MainUiState, vm: MainViewModel) {
 
         if (state.message.isNotEmpty()) {
             item(key = "message") {
+                // 消息条保留语义色（错误红/成功青），保证可读性；只套大圆角玻璃描边
+                val dark = isSystemInDarkTheme()
                 Card(
                     colors = CardDefaults.cardColors(
                         containerColor = if (state.isError) MaterialTheme.colorScheme.errorContainer
-                        else MaterialTheme.colorScheme.secondaryContainer
+                        else if (dark) Color(0xB3212940) else Color(0xCCFFFFFF)
                     ),
+                    shape = Glass.TileShape,
                     modifier = Modifier.fillMaxWidth()
+                        .border(1.dp, Glass.highlightBorder(dark), Glass.TileShape)
                 ) {
                     Column(Modifier.padding(12.dp)) {
-                        Text(state.message, style = MaterialTheme.typography.bodySmall)
+                        Text(state.message, style = MaterialTheme.typography.bodySmall,
+                            color = Glass.onGlass(dark))
                         Row {
                             TextButton(onClick = onClearMessage) { Text("关闭") }
                             if (state.results.isNotEmpty()) {
@@ -204,10 +319,11 @@ private fun HomeScreen(state: MainUiState, vm: MainViewModel) {
                 HorizontalDivider(Modifier.padding(vertical = 6.dp))
                 Text("支持：${vm.supportedPlatforms}", style = MaterialTheme.typography.bodySmall)
                 Text(
-                    "点缩略图直接预览；动图点开就直接轮播、播完自动暂停；右上角圆圈点一下选中、再点取消。" +
-                        "记录页里的动态照片可在 App 内直接播放内嵌视频。图集默认选最高质量 JPEG 原图，自动排除水印与缩放版本。",
+                    "点缩略图直接预览；轮播动图点开就播放、播完自动暂停；右上角圆圈点一下选中、再点取消。" +
+                        "记录页里的动态照片可在 App 内直接播放内嵌视频。文件按文案 / 话题命名并带短码去重，不会堆叠覆盖。" +
+                        "单张图文作品不会误报动图。",
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    color = Glass.onGlassSub(isSystemInDarkTheme())
                 )
                 Text(
                     "仅供保存自己有权保存的内容；请遵守平台条款与适用法律。",
@@ -245,21 +361,29 @@ private fun ResultCard(
             "图文" to p.byKind(ResourceKind.IMAGE),
             "视频" to p.videos,
             "音频" to p.audios,
-            "动图" to p.byKind(ResourceKind.ANIMATED)
+            // 只有多图作品才有本地合成的轮播动图；明确标注「合成」，
+            // 不暗示作品本身带 GIF 动图（用户明确反馈不该假识别）。
+            "轮播动图（合成）" to p.byKind(ResourceKind.ANIMATED)
         ).filter { it.second.isNotEmpty() }
     }
 
-    Card(
-        Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+    val dark = isSystemInDarkTheme()
+    GlassBox(
+        dark = dark,
+        modifier = Modifier
+            .fillMaxWidth()
+            .shadow(12.dp, Glass.CardShape, clip = false, ambientColor = Color(0x14000000))
+            .padding(1.dp)
     ) {
-        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             // 标题行 + 右上角全选方框 + 清空
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
-                    Text("【${p.type.label}】${p.title}", fontWeight = FontWeight.SemiBold)
+                    Text("【${p.type.label}】${p.title}", fontWeight = FontWeight.Bold,
+                        color = Glass.onGlass(dark))
                     if (p.author.isNotBlank()) {
-                        Text("作者：${p.author}", style = MaterialTheme.typography.bodySmall)
+                        Text("作者：${p.author}", style = MaterialTheme.typography.bodySmall,
+                            color = Glass.onGlassSub(dark))
                     }
                 }
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -306,15 +430,16 @@ private fun ResultCard(
             when {
                 p.isLivePhoto -> Text("检测到实况图 · 将合成为小米动态照片",
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.primary)
-                // 本地合成动图：明确告诉用户「动图」栏里那一项下载后就是会动的文件
+                    color = Glass.Accent)
+                // 诚实标注：只在真有多张静态帧时提供「合成」动图，
+                // 单图作品不会出现这一栏，也不宣称「识别到动图」。
                 p.resources.any { it.isLocalCompose } ->
-                    Text("已识别动图 · 勾选「动图」即可下载本地合成的轮播 GIF / 小米动态照片",
+                    Text("多图作品 · 可将静态帧合成为轮播 GIF / 小米动态照片（本地生成，非平台动图）",
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.primary)
-                p.livePhotoWork -> Text("已识别为实况图作品 · 静态帧与原声可下载",
+                        color = Glass.Accent)
+                p.livePhotoWork -> Text("单张图文 + 原声 · 本作品不含动图，静态图与原声可下载",
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.primary)
+                    color = Glass.onGlassSub(dark))
             }
 
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -355,7 +480,8 @@ private fun RowScope.ResourceTile(
             .build()
     }
 
-    Card(
+    val dark = isSystemInDarkTheme()
+    Column(
         modifier = Modifier
             .weight(1f)
             .padding(4.dp)
@@ -364,12 +490,11 @@ private fun RowScope.ResourceTile(
                 scaleX = if (selected) 1.04f else 1f
                 scaleY = if (selected) 1.04f else 1f
             }
-            .clickable(onClick = onPreview),
-        elevation = CardDefaults.cardElevation(defaultElevation = if (selected) 10.dp else 1.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = if (selected) MaterialTheme.colorScheme.primaryContainer
-            else MaterialTheme.colorScheme.surface
-        )
+            .shadow(if (selected) 14.dp else 6.dp, Glass.TileShape, clip = false,
+                ambientColor = if (selected) Glass.Accent.copy(alpha = 0.3f) else Color(0x14000000))
+            .glassSurface(dark, selected, Glass.TileShape)
+            .clip(Glass.TileShape)
+            .clickable(onClick = onPreview)
     ) {
         Box {
             if (r.isImage || r.kind == ResourceKind.COVER || r.kind == ResourceKind.ANIMATED) {
@@ -378,25 +503,29 @@ private fun RowScope.ResourceTile(
                     contentDescription = r.label,
                     contentScale = ContentScale.Crop,
                     modifier = Modifier.fillMaxWidth().height(110.dp)
+                        .clip(RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp))
                 )
             } else {
                 Box(
-                    Modifier.fillMaxWidth().height(110.dp).background(MaterialTheme.colorScheme.surfaceVariant),
+                    Modifier.fillMaxWidth().height(110.dp)
+                        .background(Glass.surfaceBrush(dark)),
                     contentAlignment = Alignment.Center
                 ) {
                     Text(if (r.isVideo) "▶ 视频" else "♫ 音频",
-                        style = MaterialTheme.typography.bodyMedium)
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = Glass.onGlassSub(dark))
                 }
             }
 
-            // 右上角圆形选中按钮：选中显示对勾，未选中是空心圆
+            // 右上角圆形选中按钮：选中用主题色渐变 + 对勾，未选中是磨砂空心圆
             Box(
                 modifier = Modifier
                     .align(Alignment.TopEnd)
                     .padding(6.dp)
                     .size(26.dp)
                     .clip(CircleShape)
-                    .background(if (selected) MaterialTheme.colorScheme.primary else Scrim)
+                    .background(if (selected) Glass.accentBrush else Brush.linearGradient(
+                        listOf(Scrim, Scrim)), CircleShape)
                     .border(2.dp, Color.White, CircleShape)
                     .clickable { onToggle() },
                 contentAlignment = Alignment.Center
@@ -417,8 +546,8 @@ private fun RowScope.ResourceTile(
         }
         if (r.qualityLabel.isNotBlank()) {
             Text(r.qualityLabel, style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp), maxLines = 1)
+                color = Glass.onGlassSub(dark),
+                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp), maxLines = 1)
         }
     }
 }
@@ -567,10 +696,11 @@ private fun QueueScreen(state: MainUiState) {
 
 @Composable
 private fun QueueCard(q: QueueItem) {
-    Card(Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+    val dark = isSystemInDarkTheme()
+    GlassBox(dark, modifier = Modifier.fillMaxWidth().padding(1.dp), shape = Glass.TileShape) {
+        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text(q.label, fontWeight = FontWeight.SemiBold)
+                Text(q.label, fontWeight = FontWeight.SemiBold, color = Glass.onGlass(dark))
                 Text(
                     when (q.phase) {
                         "done" -> "✓ 完成"
@@ -641,20 +771,28 @@ private fun isMotionPhotoEntry(e: HistoryEntry): Boolean =
 
 @Composable
 private fun HistoryCard(e: HistoryEntry, fmt: SimpleDateFormat, onOpen: () -> Unit) {
-    Card(
-        Modifier.fillMaxWidth().clickable { onOpen() }
+    val dark = isSystemInDarkTheme()
+    GlassBox(
+        dark,
+        shape = Glass.TileShape,
+        modifier = Modifier.fillMaxWidth().padding(1.dp)
+            .clip(Glass.TileShape).clickable { onOpen() }
     ) {
-        Column(Modifier.padding(12.dp)) {
+        Column(Modifier.padding(14.dp)) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text(e.fileName, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                Text(e.fileName, fontWeight = FontWeight.SemiBold,
+                    color = Glass.onGlass(dark), modifier = Modifier.weight(1f))
                 if (e.previewUri.isNotBlank()) {
                     Text("预览 ›", style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.primary)
+                        color = Glass.Accent)
                 }
             }
-            Text(e.detail, style = MaterialTheme.typography.bodySmall)
-            Text(e.savedTo, style = MaterialTheme.typography.labelSmall)
-            Text(fmt.format(Date(e.timestamp)), style = MaterialTheme.typography.labelSmall)
+            Text(e.detail, style = MaterialTheme.typography.bodySmall,
+                color = Glass.onGlassSub(dark))
+            Text(e.savedTo, style = MaterialTheme.typography.labelSmall,
+                color = Glass.onGlassSub(dark))
+            Text(fmt.format(Date(e.timestamp)), style = MaterialTheme.typography.labelSmall,
+                color = Glass.onGlassSub(dark))
         }
     }
 }
@@ -676,6 +814,7 @@ private fun SettingsScreen(state: MainUiState, vm: MainViewModel) {
         AdvancedSettingsScreen(state, vm) { advanced = false }
         return
     }
+    val dark = isSystemInDarkTheme()
     Column(
         Modifier
             .fillMaxSize()
@@ -683,15 +822,18 @@ private fun SettingsScreen(state: MainUiState, vm: MainViewModel) {
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        Text("设置", style = MaterialTheme.typography.titleLarge)
-        Card(Modifier.fillMaxWidth()) {
-            Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text("MotionSaver 2.3.0 · 流畅版", fontWeight = FontWeight.SemiBold)
+        Text("设置", style = MaterialTheme.typography.titleLarge, color = Glass.onGlass(dark))
+        GlassBox(dark, modifier = Modifier.fillMaxWidth().padding(1.dp), shape = Glass.TileShape) {
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text("MotionSaver 2.6.0 · 柔光玻璃版", fontWeight = FontWeight.Bold,
+                    color = Glass.onGlass(dark))
                 Text(
                     "粘贴链接 → 解析 → 点缩略图预览 → 圆圈选中 → 下载。" +
                         "解析结果页可直接切换「提取音频」与全选。\n" +
-                        "本版为 release 预编译包：R8 全量优化 + Baseline Profile AOT，启动与滚动更顺滑。",
-                    style = MaterialTheme.typography.bodySmall
+                        "HyperOS 柔光玻璃界面；文件按文案 / 话题命名并带短码去重；" +
+                        "单图作品不再误报动图。release 预编译包：R8 全量优化 + Baseline Profile AOT。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Glass.onGlassSub(dark)
                 )
             }
         }
@@ -788,9 +930,11 @@ private fun AdvancedSettingsScreen(
             style = MaterialTheme.typography.bodySmall)
         OutlinedButton(onClick = vm::selfCheck, Modifier.fillMaxWidth()) { Text("运行自检") }
         if (state.selfCheck.isNotBlank()) {
-            Card(Modifier.fillMaxWidth()) {
-                Text(state.selfCheck, Modifier.padding(12.dp),
-                    style = MaterialTheme.typography.bodySmall)
+            val dark = isSystemInDarkTheme()
+            GlassBox(dark, modifier = Modifier.fillMaxWidth().padding(1.dp), shape = Glass.TileShape) {
+                Text(state.selfCheck, Modifier.padding(14.dp),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Glass.onGlass(dark))
             }
         }
 
@@ -799,8 +943,8 @@ private fun AdvancedSettingsScreen(
         InfoRow("解析方式", "公开页访客渲染数据 / JSON-LD / og:* 三层兜底；不构造私有签名、不绕过鉴权")
         InfoRow("画质", "图集自动选最高质量 JPEG 候选，排除水印与缩放模板；多 CDN 直链自动回退")
         InfoRow("动态照片", "JPEG + 尾部 MP4 + XMP 偏移元数据，字节级无损拼接")
-        InfoRow("架构", "core 纯 JVM 核心库（81 项单测）+ app Compose 层；arm64-v8a；minSdk 26")
-        InfoRow("性能", "release + R8 全量优化 + Baseline Profile AOT 预编译；请求设备高刷新率；列表按需组合")
+        InfoRow("架构", "core 纯 JVM 核心库（108 项单测）+ app Compose 层；arm64-v8a；minSdk 26")
+        InfoRow("性能", "release + R8 全量优化 + Baseline Profile AOT；请求设备高刷新率；玻璃为静态渐变、零逐帧模糊")
         Spacer(Modifier.height(8.dp))
     }
 }

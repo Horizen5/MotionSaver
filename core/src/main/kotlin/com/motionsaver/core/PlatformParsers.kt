@@ -48,9 +48,10 @@ class ParserRegistry(parsers: List<MediaParser> = defaultParsers()) {
 
     /** 一次粘贴 2~3 条分享链接时全部识别、逐个解析，任一失败不影响其它条。 */
     fun parseAll(shareText: String, fetcher: HttpFetcher): List<ParsedMedia> {
-        val urls = ShareText.extractUrls(shareText)
-        if (urls.isEmpty()) return listOf(parse(shareText, fetcher))
-        return urls.mapNotNull { u -> runCatching { parse(u, fetcher) }.getOrNull() }
+        // 用「文案 + 链接」的完整片段而非纯 URL，避免丢掉话题/文案导致标题退化。
+        val shares = ShareText.splitShares(shareText)
+        if (shares.isEmpty()) return listOf(parse(shareText, fetcher))
+        return shares.mapNotNull { s -> runCatching { parse(s, fetcher) }.getOrNull() }
     }
 
     fun supported(): String = list.joinToString("、") { it.platform.label }
