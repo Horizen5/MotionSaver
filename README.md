@@ -4,7 +4,28 @@
 
 > 不含任何第三方商业应用的反编译源码，不逆向平台私有签名，不绕过鉴权，不预置第三方解析端点。详见 [DISCLAIMER.md](DISCLAIMER.md)。
 
-**2.8 更新（本次）：整体换成 MIUI / HyperOS 实色风格**
+## 2.8.1 更新：回退解析版（最新产物）
+
+用户反馈同一条抖音图文链接「依旧不行、回到前两个版本那种」。实测定位如下：
+
+| 项 | 结论 |
+| --- | --- |
+| 解析链路本身 | **没坏**。同一时刻用「公开访客 Cookie + 归一化 note 地址」请求 4 个对照公开作品，分别拿到 4 / 3 / 3 / 1 张 `item_list.images` 直链 |
+| 用户这条链接 | `/share/note/7705030121148814498/` 返回 `filter_reason=status_audit_not_pass`、`item_list: []`，页面只剩一个站点 logo。**平台明确不开放媒体，任何 App 版本都取不到** |
+| 旧版为何显示过图 | 该作品 11/06 前后尚可 SSR，11/07 被平台标记审核未通过；与 v2.6→v2.8 的代码改动无关（v2.7.1 / v2.8.0 对 `core` 解析层一行未动） |
+
+因此本版**保留用户上一条要求的 MIUI 实色风格**，把解析行为回退并加固成前两个版本那种「直取访客渲染数据」：
+
+1. `ShareLinkNormalizer.noteUrlOf()`：短链跟随后的地址归一到同 ID 的无参数 `/share/note/{id}/`（`slides` 空壳也一并改写）；`canonicalShareUrl()` 保持旧语义不变。
+2. `PublicPageParser.fetchForParsing()`：首轮跟随短链，其后**优先用归一化 note 地址 + 公开访客 Cookie**，偶数轮保留完整分享参数地址重试，再退到爬虫 UA / 常规 UA；命中 `item_list` 即早停。
+3. 平台明确给出 `filter_reason` 时（`status_audit_not_pass` / 私密 / 已删除 / 风控），结果页**如实显示平台状态**并说明「与 App 版本无关，换一个已公开作品即可」，不再误报成「未渲染页面壳 / 解析失败」。
+4. 新增 `FallbackParsingTest`（4 个用例，用 11/07 真实抓取的审核页与正常页做 fixture），126 项 JVM 单测全绿。
+
+产物：`MotionSaver-2.8.1-release.apk`，versionCode 12 / 2.8.1，1,911,428 B，SHA-256 `ecebe15f1af22780d668ffef0f76825da03d635d8e05b98d6d4afadebd8c4f87`，签名 `ed2cd24a…` 与 v2.6.0～v2.8.0 一致，可直接覆盖安装。
+
+---
+
+**2.8 更新：整体换成 MIUI / HyperOS 实色风格**
 
 用户真机截图确认：连续多版的「半透明白基底 + 折射 / 菲涅尔高光」液态玻璃，在浅色主题下始终会显出一块与背景不融合的白色方框，底栏还带描边色带；且该作品公开页返回未渲染空壳导致「发现资源 0 个」。本版**彻底换风格**，不再修玻璃，改用 MIUI 的标准实色体系，从结构上消除半透明叠加问题。
 
@@ -92,7 +113,7 @@
 | **2.6 收敛** | 上面「本地合成 GIF」能力现在**只对 ≥2 张静态帧的多图作品提供**：单张静态图没有第二帧，作品本身也不含动态片段，旧版对它生成动图属于假识别。UI 分组改名为「轮播动图（合成）」，【动态图】误导标签改为【实况图】，单图作品明确提示「不含动图」 |
 | **验证** | 108 项 JVM 单测全绿（0 失败 / 0 错误）；真实「沙龙月季」3 帧原图合成的 GIF 经 Pillow 严格逐帧解码通过（3 帧 / 3.6 s / 循环 0 / 三帧互不相同）；真机样本 `MVIMG_20261106_230518.jpg` 由**实际编译产物**解析出 `videoOffset=2993063 / videoLength=2990126 / 时间戳 910229`，与 Python 二进制实测一致 |
 
-> 最终安装包：`MotionSaver-2.8.0-release.apk`（versionCode 11 / versionName 2.8.0，沿用 debug keystore 签名，可直接覆盖安装旧版），**1,911,428 B ≈ 1.82 MiB**，SHA-256 `bb8b66fadf506665091c961af702e2415ae0d805250d97492b4b5fce5e6587ac`，详见下方「交付」。APK 只走直链分发，不上传 GitHub。
+> 最终安装包：`MotionSaver-2.8.1-release.apk`（versionCode 12 / versionName 2.8.1，沿用 debug keystore 签名，可直接覆盖安装旧版），**1,911,428 B ≈ 1.82 MiB**，SHA-256 `ecebe15f1af22780d668ffef0f76825da03d635d8e05b98d6d4afadebd8c4f87`，详见下方「交付」。APK 只走直链分发，不上传 GitHub。
 
 > 关于「60Hz」：Android 没有强制设置刷新率的公开 API（刷新率由系统与厂商显示策略管理），本版做的是向系统**请求**设备支持的最高刷新率档位，并消除掉帧来源（JIT、全量重组、大图解码 GC）。系统不允许时会静默回退，不影响功能。
 
@@ -132,16 +153,16 @@ python3 verify/verify_v22.py         # 真实网络端到端：两条链接 + �
 **安装包不走 GitHub**：手机浏览器打开工作台上传页，点顶部「下载并安装 APK」（即 `/apk` 直链）即可下载安装（需允许「未知来源」）。直链带访问凭据 `?sharecode=...`，完整入口在交付消息中给出，不写进公开仓库。
 minSdk 26 / targetSdk 35 / arm64-v8a / debug 签名。
 
-### 交付（v2.8.0 最终产物）
+### 交付（v2.8.1 最终产物）
 
 | 项 | 值 |
 | --- | --- |
-| 文件 | `MotionSaver-2.8.0-release.apk` |
-| 版本 | versionCode 11 / versionName 2.8.0 |
+| 文件 | `MotionSaver-2.8.1-release.apk` |
+| 版本 | versionCode 12 / versionName 2.8.1 |
 | 体积 | 1,911,428 B（1.82 MiB / 1.911 MB），**< 10 MB** |
-| SHA-256 | `bb8b66fadf506665091c961af702e2415ae0d805250d97492b4b5fce5e6587ac` |
-| 签名 | `CN=Android Debug`，证书 SHA-256 `ed2cd24a6da533c8a9d4541dc83ab96936e51072e0298f0b6b601356c3f32d9d`，与 v2.7.1 一致，可直接覆盖安装 |
-| 校验 | `aapt dump badging` 确认包名 `com.motionsaver.app` / versionCode 11 / 2.8.0；`apksigner verify` 通过；dex 内含「2.8.0」「MIUI」「命名方案」，旧版「液态玻璃 / 折射 / 菲涅尔」字符串已消失 |
+| SHA-256 | `ecebe15f1af22780d668ffef0f76825da03d635d8e05b98d6d4afadebd8c4f87` |
+| 签名 | `CN=Android Debug`，证书 SHA-256 `ed2cd24a6da533c8a9d4541dc83ab96936e51072e0298f0b6b601356c3f32d9d`，与 v2.6.0～v2.8.0 一致，可直接覆盖安装 |
+| 校验 | `aapt dump badging` 确认包名 `com.motionsaver.app` / versionCode 12 / 2.8.1；`apksigner verify` 通过；dex 内含「2.8.1」「回退解析版」「与 App 版本无关」 |
 | 下载 | 工作台 `/apk` 直链（带 sharecode，见交付消息），**不上传 GitHub** |
 
 **在手机上**：把链接或 2~3 条整段口令一起粘贴 → 点「① 解析」→ 每个作品一张卡，缩略图右上角圆圈选中（选中会浮起放大）→ 点图直接预览 → 卡右上角方框一键全选 → 需要时打开「提取音频」→ 点「② 下载选中」。

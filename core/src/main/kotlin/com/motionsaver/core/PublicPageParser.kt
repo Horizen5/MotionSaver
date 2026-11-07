@@ -35,10 +35,31 @@ abstract class PublicPageParser : MediaParser {
     private data class PageSnapshot(
         val response: HttpFetcher.Response,
         val jsonLd: JsonLdMedia = JsonLdMedia(),
-        val router: ParsedMedia? = null
+        val router: ParsedMedia? = null,
+        /** 平台在 SSR 里明确给出的过滤原因，如 status_audit_not_pass。 */
+        val filterReason: String = ""
     ) {
         val score: Int
             get() = (router?.resources?.size ?: 0) * 10_000 + jsonLd.mediaCount * 1_000
+    }
+
+    /** 平台明确声明「不给媒体」的状态：这不是解析失败，也不是页面空壳。 */
+    private val FILTER_REASON = Regex(
+        """\x22filter_reason\x22\s*:\s*\x22([^\x22]+)\x22""",
+        RegexOption.IGNORE_CASE
+    )
+
+    /** 把平台过滤码翻成用户能看懂的一句话。 */
+    private fun filterReasonText(reason: String): String = when {
+        reason.contains("audit_not_pass", true) ->
+            "该作品当前未通过公开审核（常见于刚发布仍在审核中、或仅作者与部分人可见）"
+        reason.contains("private", true) || reason.contains("permission", true) ->
+            "该作品为私密/限可见范围作品"
+        reason.contains("delete", true) || reason.contains("not_exist", true) ->
+            "该作品已删除或不存在"
+        reason.contains("risk", true) || reason.contains("ban", true) ->
+            "该作品被平台风控限制公开分发"
+        else -> "平台标记该作品暂不可公开分发（$reason）"
     }
 
     protected val fetchHeaders = mapOf(
@@ -87,11 +108,16 @@ abstract class PublicPageParser : MediaParser {
     }
 
     /**
-     * 多策略取页，优先级：
-     *   1. 公开访客 Cookie + 普通手机 UA → `videoInfoRes` 完整四类数据（画质最好、字段最准）
-     *   2. 搜索引擎爬虫 UA → JSON-LD 结构化数据（图集）
-     *   3. 普通 UA → og:* / 内嵌 JSON 兜底
-     * 平台 SSR 是概率性返回，每种策略都留重试；命中完整数据即早停。
+     * 多策略取页（回到前两个版本那种「直取访客渲染数据」的行为，并加固）：
+     *   0. 先跟随短链 / 长链拿到 finalUrl（带完整分享参数）
+     *   1. 归一化的 /share/note/{id}/ + 公开访客 Cookie → `videoInfoRes` 完整四类数据
+     *   2. 保留完整分享参数的地址 + 访客 Cookie → 兜底（部分作品参数必需）
+     *   3. 搜索引擎爬虫 UA → JSON-LD 结构化数据
+     *   4. 普通 UA → og:* / 内嵌 JSON 兜底
+     *
+     * 实测：/share/slides/{id}/ 只回未渲染壳；归一化到同 ID 的 /share/note/{id}/
+     * 后，公开作品能稳定拿到 item_list.images。平台 SSR 有概率性，故保留重试。
+     * 命中完整数据即早停；全部失败时优先保留「带明确过滤原因」的那次结果。
      */
     private fun fetchForParsing(
         url: String,
@@ -102,38 +128,48 @@ abstract class PublicPageParser : MediaParser {
         val visitor = if (url.contains("douyin", ignoreCase = true) || platform == Platform.DOUYIN) {
             ensureVisitorToken(fetcher)
         } else ""
-        var requestUrl = url
+        var fullUrl = ShareLinkNormalizer.normalize(url)
+        var canonical = ShareLinkNormalizer.noteUrlOf(fullUrl)
         var best: PageSnapshot? = null
 
-        val strategies = buildList<Pair<Map<String, String>, String>> {
+        val strategies = buildList<Map<String, String>> {
             if (visitor.isNotBlank()) {
                 val h = fetchHeaders + mapOf(
                     "Cookie" to "ttwid=$visitor",
                     "Referer" to "https://www.douyin.com/"
                 )
-                repeat(3) { add(h to "访客") }
+                repeat(3) { add(h) }
             }
-            repeat(2) { add(seoHeaders to "爬虫") }
-            add(fetchHeaders to "常规")
+            repeat(2) { add(seoHeaders) }
+            add(fetchHeaders)
         }
 
-        for ((headers, _) in strategies) {
-            val res = runCatching { fetcher.get(requestUrl, headers) }.getOrNull() ?: continue
+        for ((idx, headers) in strategies.withIndex()) {
+            // 第 0 次沿原链接跟随重定向；之后奇数轮用归一化 note 地址、偶数轮
+            // 用完整参数地址，两种形态都覆盖，避免「改了 URL 反而拿不到」。
+            val target = when {
+                idx == 0 -> fullUrl
+                idx % 2 == 1 -> canonical
+                else -> fullUrl
+            }
+            val res = runCatching { fetcher.get(target, headers) }.getOrNull() ?: continue
             if (res.code !in 200..299) continue
-            // 复用重定向后的完整地址，保留分享参数，避免反复走短链。
-            // 图集短链会落到 /share/slides/{id}/（只回未渲染页面壳），这里归一化为
-            // 同 ID 的 /share/note/{id}/，后续策略用它能拿到完整 _ROUTER_DATA。
             if (res.finalUrl.isNotBlank()) {
-                requestUrl = ShareLinkNormalizer.canonicalShareUrl(res.finalUrl)
+                fullUrl = res.finalUrl
+                canonical = ShareLinkNormalizer.noteUrlOf(fullUrl)
             }
 
             val html = res.text()
             val snap = PageSnapshot(
                 response = res,
                 jsonLd = JsonLdParser.parse(html),
-                router = RouterDataParser.parse(html, platform, url, defaultTitle)
+                router = RouterDataParser.parse(html, platform, url, defaultTitle),
+                filterReason = FILTER_REASON.find(html)?.groupValues?.get(1).orEmpty()
             )
-            if (best == null || snap.score > best!!.score) best = snap
+            val b = best
+            if (b == null || snap.score > b.score ||
+                (snap.score == b.score && b.filterReason.isBlank() && snap.filterReason.isNotBlank())
+            ) best = snap
             if (snap.router != null) return snap
         }
         return best ?: PageSnapshot(fetchPublicPage(url, fetcher))
@@ -453,14 +489,22 @@ abstract class PublicPageParser : MediaParser {
         val resources = renumberImages(merged)
         val (liveCover, liveVideo) = detectLive(html, resources)
 
+        val filterReason = snap.filterReason
         val warnings = mutableListOf<String>()
         if (resources.isEmpty() && liveCover == null) {
-            warnings.add("该公开页没有暴露可下载的媒体地址（平台返回了未渲染的页面壳）。")
-            warnings.add("已自动切换多种公开取页策略并重试；仍失败时可在「设置 → 高级设置 → 解析端点」填入你自己的合规数据源。")
+            if (filterReason.isNotBlank()) {
+                // 平台已明确声明「不给数据」：如实报告，不再误说成 App 解析失败 / 页面空壳。
+                warnings.add("平台状态 $filterReason：${filterReasonText(filterReason)}，公开页未返回任何图片或视频地址。")
+                warnings.add("这不是解析失败、也与 App 版本无关：换一个已公开的作品即可正常解析，或等作品审核通过后再试。")
+            } else {
+                warnings.add("该公开页没有暴露可下载的媒体地址（平台返回了未渲染的页面壳）。")
+                warnings.add("已自动切换多种公开取页策略并重试；仍失败时可在「设置 → 高级设置 → 解析端点」填入你自己的合规数据源。")
+            }
         }
 
         val notes = mutableListOf<String>()
         notes.add("数据源：公开分享页 ${page.finalUrl.take(120)}")
+        if (filterReason.isNotBlank()) notes.add("平台过滤原因：$filterReason")
         if (ld.mediaCount > 0) {
             notes.add(
                 "命中 JSON-LD 结构化数据：图 ${ld.imageUrls.size} / 视频 ${ld.videoUrls.size} / 音频 ${ld.audioUrls.size}"

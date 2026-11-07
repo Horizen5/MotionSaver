@@ -26,8 +26,26 @@ object ShareLinkNormalizer {
         RegexOption.IGNORE_CASE
     )
 
+    /** 仅把 slides 页壳改写成同 ID 的 note 页；普通 note / video 链接原样保留。 */
     fun canonicalShareUrl(url: String): String =
         SLIDES_PATH.find(url)?.let { "https://www.iesdouyin.com/share/note/${it.groupValues[1]}/" }
+            ?: url
+
+    private val SHARE_PATH = Regex(
+        """(?:www\.|m\.)?(?:iesdouyin|douyin)\.com/share/(?:slides|note)/(\d{6,})""",
+        RegexOption.IGNORE_CASE
+    )
+
+    /**
+     * 生成「同一 itemId 的不带参数 /share/note/{id}/」地址，供访客取页首选。
+     *
+     * 实测：/share/slides/{id}/ 只回 25KB 未渲染页面壳；短链跟随后的
+     * /share/note/{id}/?region=...&share_sign=... 与不带参数的同路径都能拿到
+     * 完整 _ROUTER_DATA，但去掉参数更稳（避免个别参数触发 SSR 降级）。
+     * 完整参数地址仍作为备选策略保留。
+     */
+    fun noteUrlOf(url: String): String =
+        SHARE_PATH.find(url)?.let { "https://www.iesdouyin.com/share/note/${it.groupValues[1]}/" }
             ?: url
 
     /** 补齐协议、去掉明显误粘的尾部字符。短链原样保留（重定向由网络层处理）。 */

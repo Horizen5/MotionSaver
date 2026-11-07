@@ -847,11 +847,14 @@ private fun SettingsScreen(state: MainUiState, vm: MainViewModel) {
         Text("设置", style = MaterialTheme.typography.titleLarge, color = Glass.onGlass(dark))
         GlassBox(dark, modifier = Modifier.fillMaxWidth().padding(1.dp), shape = Glass.TileShape) {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text("MotionSaver 2.8.0 · MIUI 实色风格版", fontWeight = FontWeight.Bold,
+                Text("MotionSaver 2.8.1 · 回退解析版", fontWeight = FontWeight.Bold,
                     color = Glass.onGlass(dark))
                 Text(
                     "粘贴链接 → 解析 → 点缩略图预览 → 圆圈选中 → 下载。" +
                         "解析结果页可直接切换「提取音频」与全选。\n" +
+                        "解析已回到前两个版本的取数方式：短链归一到 /share/note/{id}/，" +
+                        "用公开访客 Cookie 直取 _ROUTER_DATA，并保留完整参数地址重试。" +
+                        "平台明确返回「审核未通过/暂不公开」时会如实提示，不再误报成解析失败。\n" +
                         "MIUI / HyperOS 实色风格：纯浅灰底 + 白色实色圆角卡片 + HyperOS 蓝，" +
                         "无玻璃无光晕、层次干净；命名方案可自由组合。单图作品不再误报动图。" +
                         "release：R8 全量优化 + Baseline Profile AOT。",
