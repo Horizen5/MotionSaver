@@ -3,10 +3,12 @@ package com.motionsaver.app.data
 import android.content.Context
 import com.motionsaver.core.EndpointSpec
 import com.motionsaver.core.FieldMap
+import com.motionsaver.core.NameTemplate
 
 /**
  * App 设置。所有可配置项都能在设置页改，且实时生效，无需重编译。
  * 「解析端点」是让四类资源完整落地的关键：使用者填自己的合规数据源即可。
+ * 「命名方案」用可自由排列的字段序列描述落盘名，详见 [NameTemplate]。
  */
 data class AppSettings(
     val endpointEnabled: Boolean = false,
@@ -22,7 +24,11 @@ data class AppSettings(
     val motionPhotoEnabled: Boolean = true,
     /** 平台没给音频地址时，从已下载视频里无损抽音轨 */
     val extractAudioFromVideo: Boolean = false,
-    val concurrency: Int = 3
+    val concurrency: Int = 3,
+    /** 命名方案：字段 key 用 | 连接，顺序即文件名顺序 */
+    val namingPattern: String = NameTemplate.DEFAULT_PATTERN,
+    /** 字段之间的分隔符，取值限定在 NameTemplate.SEPARATORS 白名单 */
+    val namingSeparator: String = NameTemplate.DEFAULT_SEPARATOR
 ) {
     fun toEndpointSpec(): EndpointSpec? {
         if (!endpointEnabled || !endpointUrl.contains("{url}")) return null
@@ -59,7 +65,10 @@ class SettingsStore(context: Context) {
         saveCaption = sp.getBoolean(K_SAVE_CAPTION, true),
         motionPhotoEnabled = sp.getBoolean(K_MOTION, true),
         extractAudioFromVideo = sp.getBoolean(K_EXTRACT_AUDIO, false),
-        concurrency = sp.getInt(K_CONCURRENCY, 3)
+        concurrency = sp.getInt(K_CONCURRENCY, 3),
+        namingPattern = sp.getString(K_NAMING_PATTERN, NameTemplate.DEFAULT_PATTERN)
+            .orEmpty().ifBlank { NameTemplate.DEFAULT_PATTERN },
+        namingSeparator = sp.getString(K_NAMING_SEP, NameTemplate.DEFAULT_SEPARATOR) ?: NameTemplate.DEFAULT_SEPARATOR
     )
 
     fun save(s: AppSettings) {
@@ -77,6 +86,8 @@ class SettingsStore(context: Context) {
             .putBoolean(K_MOTION, s.motionPhotoEnabled)
             .putBoolean(K_EXTRACT_AUDIO, s.extractAudioFromVideo)
             .putInt(K_CONCURRENCY, s.concurrency)
+            .putString(K_NAMING_PATTERN, s.namingPattern)
+            .putString(K_NAMING_SEP, s.namingSeparator)
             .apply()
     }
 
@@ -94,5 +105,7 @@ class SettingsStore(context: Context) {
         const val K_MOTION = "motion"
         const val K_EXTRACT_AUDIO = "extract_audio"
         const val K_CONCURRENCY = "concurrency"
+        const val K_NAMING_PATTERN = "naming_pattern"
+        const val K_NAMING_SEP = "naming_sep"
     }
 }

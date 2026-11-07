@@ -16,11 +16,16 @@ object FileNameAllocator {
      * 同一作品恒定、不同作品几乎必不相同，且不影响 UI 显示的干净标题。
      */
     fun scopedTitle(title: String, itemId: String, sourceUrl: String): String {
+        val code = shortCode(itemId, sourceUrl)
+        return if (code.isBlank()) title else "$title-$code"
+    }
+
+    /** 稳定 6 位短码：取自作品 ID（缺省用链接），同一作品恒定、不同作品几乎必不同。 */
+    fun shortCode(itemId: String, sourceUrl: String): String {
         val seed = itemId.ifBlank { sourceUrl }
-        if (seed.isBlank()) return title
-        val code = (seed.hashCode().toLong() and 0xFFFFFFL)
+        if (seed.isBlank()) return ""
+        return (seed.hashCode().toLong() and 0xFFFFFFL)
             .toString(16).uppercase().padStart(6, '0')
-        return "$title-$code"
     }
 
     fun allocate(

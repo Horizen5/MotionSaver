@@ -94,9 +94,26 @@ class SaveMediaUseCase(
         }
         val cache = File(context.cacheDir, "ms_dl").apply { mkdirs() }
         val used = existing.toMutableSet()
-        // 落盘名带稳定短码去重；UI 上显示的仍是干净的 parsed.title（文案/话题）。
-        // 这样即便两个作品话题完全相同，文件名也不会互相覆盖、堆叠。
-        val fileTitle = FileNameAllocator.scopedTitle(parsed.title, parsed.itemId, parsed.sourceUrl)
+        // 落盘名按「设置 → 命名方案」里用户自由排列的字段生成；
+        // 默认模板仍是「标题-短码」，保证不同作品不会互相覆盖、堆叠。
+        // UI 上显示的始终是干净的 parsed.title（文案 / 话题）。
+        val namingTokens = NameTemplate.parse(settings.namingPattern)
+        val namingSep = settings.namingSeparator
+        val nameCtx = NameContext(
+            title = parsed.title,
+            author = parsed.author.ifBlank { WorkTitle.authorOf(parsed.caption) },
+            platform = parsed.platform.label,
+            itemId = parsed.itemId,
+            sourceUrl = parsed.sourceUrl,
+            typeLabel = parsed.type.label,
+            topics = WorkTitle.topics(parsed.caption).ifBlank { parsed.title }
+        )
+        val composedTitle = NameTemplate.format(namingTokens, namingSep, nameCtx)
+        val fileTitle = composedTitle.ifBlank {
+            FileNameAllocator.scopedTitle(parsed.title, parsed.itemId, parsed.sourceUrl)
+        }
+        /** 模板里含「序号」时由模板决定序号位置，不再额外追加 _01 后缀 */
+        val hasIndexToken = namingTokens.contains(NameToken.INDEX)
         val saved = mutableListOf<SavedFile>()
         val failures = mutableListOf<String>()
 
@@ -113,7 +130,10 @@ class SaveMediaUseCase(
             val label = r.label.ifBlank { "资源 ${i + 1}" }
             try {
                 val ext = r.suggestedExtension()
-                val name = nameFor(fileTitle, r, ext, imageCount, used)
+                val name = nameFor(
+                    fileTitle, r, ext, imageCount, used,
+                    namingTokens, namingSep, nameCtx, hasIndexToken
+                )
                 val tmp = File(cache, "dl_$id.$ext")
                 downloader.download(listOf(r.url) + r.alternatives, r.headers, tmp, label) { p ->
                     onEvent(
@@ -329,11 +349,22 @@ class SaveMediaUseCase(
         r: MediaResource,
         ext: String,
         imageCount: Int,
-        used: Set<String>
-    ): String =
-        if (r.index > 0 && imageCount > 1) {
+        used: Set<String>,
+        namingTokens: List<NameToken>,
+        sep: String,
+        ctx: NameContext,
+        hasIndexToken: Boolean
+    ): String {
+        // 用户把「序号」放进自定义模板时，按该资源序号重算一次，
+        // 且不再走 allocateSeries，避免文件名出现两处序号。
+        if (hasIndexToken && r.index > 0) {
+            val per = NameTemplate.format(namingTokens, sep, ctx.copy(index = r.index))
+            return FileNameAllocator.allocate(per.ifBlank { title }, ext, used)
+        }
+        return if (r.index > 0 && imageCount > 1) {
             FileNameAllocator.allocateSeries(title, ext, r.index - 1, imageCount, used)
         } else {
             FileNameAllocator.allocate(title, ext, used)
         }
+    }
 }

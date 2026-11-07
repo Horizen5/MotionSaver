@@ -66,6 +66,17 @@ object WorkTitle {
         return if (body.isNotBlank() && !isGeneric(body)) sanitize(body) else ""
     }
 
+    /**
+     * 从分享口令模板里取作者名：`【陌沫つ゛的图文作品】` → `陌沫つ゛`。
+     * 公开页常常拿不到 author 结构化字段，口令模板是最稳的来源。
+     */
+    fun authorOf(text: String): String {
+        val m = Regex("""【([^】]{1,30})的(?:图文作品|视频作品|图文|作品)】""").find(text)
+            ?: Regex("""\[([^\]]{1,30})的(?:图文作品|视频作品|图文|作品)\]""").find(text)
+        val name = m?.groupValues?.getOrNull(1).orEmpty().trim()
+        return if (name.length >= 2 && !isGeneric(name)) sanitize(name) else ""
+    }
+
     /** 清洗后的正文（去链接 / 口令模板 / 时间随机码 / 话题符号）。 */
     fun bodyOf(text: String): String {
         val s = strip(text).replace('#', ' ')

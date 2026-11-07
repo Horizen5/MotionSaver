@@ -24,6 +24,9 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -126,7 +129,10 @@ fun AppRoot(
 @Composable
 private fun GlassNavBar(dark: Boolean, tab: Int, onSelect: (Int) -> Unit) {
     Box(
-        Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp)
+        Modifier
+            .fillMaxWidth()
+            .navigationBarsPadding()
+            .padding(start = 16.dp, end = 16.dp, top = 10.dp, bottom = 24.dp)
     ) {
         Row(
             Modifier
@@ -212,30 +218,38 @@ private fun HomeScreen(state: MainUiState, vm: MainViewModel) {
 
         item(key = "input_field") {
             val dark = isSystemInDarkTheme()
+            // BasicTextField 没有任何内建容器 / 指示线，从根本上消除旧版
+            // OutlinedTextField 自带的那块显白「白色方框」，与玻璃背景完全融合。
             Box(
                 Modifier
                     .fillMaxWidth()
                     .shadow(10.dp, Glass.CardShape, clip = false, ambientColor = Color(0x14000000))
                     .glassSurface(dark, shape = Glass.CardShape)
+                    .padding(horizontal = 18.dp, vertical = 16.dp)
             ) {
-                OutlinedTextField(
+                BasicTextField(
                     value = state.input,
                     onValueChange = vm::onInputChange,
-                    modifier = Modifier.fillMaxWidth().heightIn(min = 100.dp).padding(4.dp),
-                    placeholder = { Text("抖音 / 小红书 / 任意网页链接，可粘贴 2~3 条整段口令",
-                        color = Glass.onGlassSub(dark)) },
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 96.dp),
                     enabled = !state.isAnalyzing && !state.isDownloading,
                     maxLines = 8,
-                    shape = Glass.CardShape,
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = Color.Transparent,
-                        unfocusedBorderColor = Color.Transparent,
-                        disabledBorderColor = Color.Transparent,
-                        focusedContainerColor = Color.Transparent,
-                        unfocusedContainerColor = Color.Transparent,
-                        focusedTextColor = Glass.onGlass(dark),
-                        unfocusedTextColor = Glass.onGlass(dark)
-                    )
+                    textStyle = TextStyle(
+                        color = Glass.onGlass(dark),
+                        fontSize = 15.sp,
+                        lineHeight = 23.sp
+                    ),
+                    cursorBrush = SolidColor(Glass.Accent),
+                    decorationBox = { inner ->
+                        if (state.input.isEmpty()) {
+                            Text(
+                                "抖音 / 小红书 / 任意网页链接，可粘贴 2~3 条整段口令",
+                                color = Glass.onGlassSub(dark),
+                                fontSize = 14.sp,
+                                lineHeight = 23.sp
+                            )
+                        }
+                        inner()
+                    }
                 )
             }
         }
@@ -251,8 +265,7 @@ private fun HomeScreen(state: MainUiState, vm: MainViewModel) {
                         .shadow(14.dp, Glass.PillShape, clip = false,
                             ambientColor = Glass.Accent.copy(alpha = 0.35f),
                             spotColor = Glass.Accent.copy(alpha = 0.35f))
-                        .background(Glass.accentBrush, Glass.PillShape)
-                        .clip(Glass.PillShape)
+                        .liquidButton(Glass.accentBrush, Glass.PillShape)
                         .clickable(enabled = !state.isAnalyzing && !state.isDownloading) { onAnalyze() },
                     contentAlignment = Alignment.Center
                 ) {
@@ -264,8 +277,7 @@ private fun HomeScreen(state: MainUiState, vm: MainViewModel) {
                         .weight(1f)
                         .height(50.dp)
                         .shadow(10.dp, Glass.PillShape, clip = false, ambientColor = Color(0x14000000))
-                        .background(Glass.accentBrushMint, Glass.PillShape)
-                        .clip(Glass.PillShape)
+                        .liquidButton(Glass.accentBrushMint, Glass.PillShape)
                         .clickable(enabled = state.results.isNotEmpty() && !state.isDownloading) { onDownload() },
                     contentAlignment = Alignment.Center
                 ) {
@@ -294,11 +306,11 @@ private fun HomeScreen(state: MainUiState, vm: MainViewModel) {
                 Card(
                     colors = CardDefaults.cardColors(
                         containerColor = if (state.isError) MaterialTheme.colorScheme.errorContainer
-                        else if (dark) Color(0xB3212940) else Color(0xCCFFFFFF)
+                        else Color.Transparent
                     ),
                     shape = Glass.TileShape,
                     modifier = Modifier.fillMaxWidth()
-                        .border(1.dp, Glass.highlightBorder(dark), Glass.TileShape)
+                        .glassSurface(dark, shape = Glass.TileShape)
                 ) {
                     Column(Modifier.padding(12.dp)) {
                         Text(state.message, style = MaterialTheme.typography.bodySmall,
@@ -320,8 +332,8 @@ private fun HomeScreen(state: MainUiState, vm: MainViewModel) {
                 Text("支持：${vm.supportedPlatforms}", style = MaterialTheme.typography.bodySmall)
                 Text(
                     "点缩略图直接预览；轮播动图点开就播放、播完自动暂停；右上角圆圈点一下选中、再点取消。" +
-                        "记录页里的动态照片可在 App 内直接播放内嵌视频。文件按文案 / 话题命名并带短码去重，不会堆叠覆盖。" +
-                        "单张图文作品不会误报动图。",
+                        "记录页里的动态照片可在 App 内直接播放内嵌视频。文件名默认按文案 / 话题 + 短码去重，" +
+                        "可在「设置 → 命名方案」里自由组合日期、作者、序号等字段。单张图文作品不会误报动图。",
                     style = MaterialTheme.typography.bodySmall,
                     color = Glass.onGlassSub(isSystemInDarkTheme())
                 )
@@ -810,8 +822,13 @@ private fun EmptyHint(text: String) {
 @Composable
 private fun SettingsScreen(state: MainUiState, vm: MainViewModel) {
     var advanced by remember { mutableStateOf(false) }
+    var naming by remember { mutableStateOf(false) }
     if (advanced) {
         AdvancedSettingsScreen(state, vm) { advanced = false }
+        return
+    }
+    if (naming) {
+        NamingSettingsScreen(state, vm) { naming = false }
         return
     }
     val dark = isSystemInDarkTheme()
@@ -825,23 +842,27 @@ private fun SettingsScreen(state: MainUiState, vm: MainViewModel) {
         Text("设置", style = MaterialTheme.typography.titleLarge, color = Glass.onGlass(dark))
         GlassBox(dark, modifier = Modifier.fillMaxWidth().padding(1.dp), shape = Glass.TileShape) {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text("MotionSaver 2.6.0 · 柔光玻璃版", fontWeight = FontWeight.Bold,
+                Text("MotionSaver 2.7.0 · 液态玻璃版", fontWeight = FontWeight.Bold,
                     color = Glass.onGlass(dark))
                 Text(
                     "粘贴链接 → 解析 → 点缩略图预览 → 圆圈选中 → 下载。" +
                         "解析结果页可直接切换「提取音频」与全选。\n" +
-                        "HyperOS 柔光玻璃界面；文件按文案 / 话题命名并带短码去重；" +
-                        "单图作品不再误报动图。release 预编译包：R8 全量优化 + Baseline Profile AOT。",
+                        "iOS 26 液态玻璃 + HyperOS 生命感美学：边缘折射、镜面高光、菲涅尔内发光；" +
+                        "命名方案可自由组合。单图作品不再误报动图。release：R8 全量优化 + Baseline Profile AOT。",
                     style = MaterialTheme.typography.bodySmall,
                     color = Glass.onGlassSub(dark)
                 )
             }
         }
+        Button(onClick = { naming = true }, Modifier.fillMaxWidth()) {
+            Text("命名方案 →  自由组合日期 / 作者 / 序号 / 标题")
+        }
         Button(onClick = { advanced = true }, Modifier.fillMaxWidth()) {
             Text("高级设置 →")
         }
         Text(
-            "端点配置、字段映射、并发数、保存行为、动态照片自检等都收在高级设置里，主页面不再堆砌。",
+            "命名方案里可排列组合日期、时间、序号、标题、作者、平台、作品 ID、短码等字段并实时预览；" +
+                "端点配置、字段映射、并发数、保存行为、动态照片自检等收在高级设置里。",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
@@ -943,8 +964,8 @@ private fun AdvancedSettingsScreen(
         InfoRow("解析方式", "公开页访客渲染数据 / JSON-LD / og:* 三层兜底；不构造私有签名、不绕过鉴权")
         InfoRow("画质", "图集自动选最高质量 JPEG 候选，排除水印与缩放模板；多 CDN 直链自动回退")
         InfoRow("动态照片", "JPEG + 尾部 MP4 + XMP 偏移元数据，字节级无损拼接")
-        InfoRow("架构", "core 纯 JVM 核心库（108 项单测）+ app Compose 层；arm64-v8a；minSdk 26")
-        InfoRow("性能", "release + R8 全量优化 + Baseline Profile AOT；请求设备高刷新率；玻璃为静态渐变、零逐帧模糊")
+        InfoRow("架构", "core 纯 JVM 核心库（单测全绿）+ app Compose 层；arm64-v8a；minSdk 26")
+        InfoRow("性能", "release + R8 全量优化 + Baseline Profile AOT；请求设备高刷新率；液态玻璃为静态渐变、drawWithCache 缓存画笔、零逐帧模糊")
         Spacer(Modifier.height(8.dp))
     }
 }

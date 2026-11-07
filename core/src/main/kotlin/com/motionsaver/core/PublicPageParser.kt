@@ -442,6 +442,7 @@ abstract class PublicPageParser : MediaParser {
             .ifBlank { pageTitle }
             .ifBlank { defaultTitle }
         val author = ld.author.ifBlank { extractAuthor(html) }
+            .ifBlank { WorkTitle.authorOf(shareText) }
         val caption = ld.description.ifBlank { extractCaption(html) }
 
         // 图集以 JSON-LD 为准，再补页面里其它未重复的媒体链接
