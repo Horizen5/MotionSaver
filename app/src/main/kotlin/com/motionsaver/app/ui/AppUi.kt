@@ -137,8 +137,13 @@ private fun GlassNavBar(dark: Boolean, tab: Int, onSelect: (Int) -> Unit) {
         Row(
             Modifier
                 .fillMaxWidth()
-                .shadow(16.dp, Glass.PillShape, clip = false, ambientColor = Color(0x1A000000))
-                .glassSurface(dark, shape = Glass.PillShape)
+                .shadow(10.dp, Glass.PillShape, clip = false, ambientColor = Color(0x12000000))
+                .edgeGlass(
+                    dark,
+                    shape = Glass.PillShape,
+                    centerTint = if (dark) Color.White.copy(alpha = 0.04f)
+                    else Color.White.copy(alpha = 0.07f)
+                )
                 .padding(horizontal = 8.dp, vertical = 8.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
@@ -218,19 +223,32 @@ private fun HomeScreen(state: MainUiState, vm: MainViewModel) {
 
         item(key = "input_field") {
             val dark = isSystemInDarkTheme()
-            // BasicTextField 没有任何内建容器 / 指示线，从根本上消除旧版
-            // OutlinedTextField 自带的那块显白「白色方框」，与玻璃背景完全融合。
+            // 中心 100% 透明：只保留轮廓边缘的折射柔光带与镜面高光，不铺任何半透明白基底。
+            // 旧版把 baseBrush 铺满整块、又叠了 decorationBox 容器，在浅色渐变上
+            // 显出一块边界清晰的浅白矩形（真机截图里的「白色方框」）；现在结构性消除：
+            //   edgeGlass 中心全透 + 去掉 decorationBox + BasicTextField 显式透明背景。
             Box(
                 Modifier
                     .fillMaxWidth()
-                    .shadow(10.dp, Glass.CardShape, clip = false, ambientColor = Color(0x14000000))
-                    .glassSurface(dark, shape = Glass.CardShape)
+                    .heightIn(min = 112.dp)
+                    .edgeGlass(dark, shape = Glass.CardShape)
                     .padding(horizontal = 18.dp, vertical = 16.dp)
             ) {
+                if (state.input.isEmpty()) {
+                    Text(
+                        "抖音 / 小红书 / 任意网页链接，可粘贴 2~3 条整段口令",
+                        color = Glass.onGlassSub(dark),
+                        fontSize = 14.sp,
+                        lineHeight = 23.sp
+                    )
+                }
                 BasicTextField(
                     value = state.input,
                     onValueChange = vm::onInputChange,
-                    modifier = Modifier.fillMaxWidth().heightIn(min = 96.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 96.dp)
+                        .background(Color.Transparent),
                     enabled = !state.isAnalyzing && !state.isDownloading,
                     maxLines = 8,
                     textStyle = TextStyle(
@@ -238,18 +256,7 @@ private fun HomeScreen(state: MainUiState, vm: MainViewModel) {
                         fontSize = 15.sp,
                         lineHeight = 23.sp
                     ),
-                    cursorBrush = SolidColor(Glass.Accent),
-                    decorationBox = { inner ->
-                        if (state.input.isEmpty()) {
-                            Text(
-                                "抖音 / 小红书 / 任意网页链接，可粘贴 2~3 条整段口令",
-                                color = Glass.onGlassSub(dark),
-                                fontSize = 14.sp,
-                                lineHeight = 23.sp
-                            )
-                        }
-                        inner()
-                    }
+                    cursorBrush = SolidColor(Glass.Accent)
                 )
             }
         }
@@ -842,7 +849,7 @@ private fun SettingsScreen(state: MainUiState, vm: MainViewModel) {
         Text("设置", style = MaterialTheme.typography.titleLarge, color = Glass.onGlass(dark))
         GlassBox(dark, modifier = Modifier.fillMaxWidth().padding(1.dp), shape = Glass.TileShape) {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text("MotionSaver 2.7.0 · 液态玻璃版", fontWeight = FontWeight.Bold,
+                Text("MotionSaver 2.7.1 · 无缝玻璃版", fontWeight = FontWeight.Bold,
                     color = Glass.onGlass(dark))
                 Text(
                     "粘贴链接 → 解析 → 点缩略图预览 → 圆圈选中 → 下载。" +

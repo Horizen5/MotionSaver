@@ -2,6 +2,13 @@
 <resources>
     <style name="Theme.MotionSaver" parent="android:Theme.Material.Light.NoActionBar">
         <item name="android:windowLightStatusBar">true</item>
+        <item name="android:windowLightNavigationBar">true</item>
+        <!-- 全透明系统栏：让 App 的连续渐变一直绘制到屏幕物理底部，
+             不再与系统的浅色导航栏背景形成水平分层 -->
         <item name="android:windowBackground">@color/background</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:enforceStatusBarContrast">false</item>
+        <item name="android:enforceNavigationBarContrast">false</item>
     </style>
 </resources>

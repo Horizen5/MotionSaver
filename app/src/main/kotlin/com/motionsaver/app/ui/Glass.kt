@@ -119,7 +119,7 @@ object Glass {
             selected && dark -> listOf(Color(0x3A5B72FF), Color(0x2C2B3F70))
             selected -> listOf(Color(0x6FC3D8FF), Color(0x5AA6D4FF))
             dark -> listOf(Color(0x33222B42), Color(0x24191F30))
-            else -> listOf(Color(0x52FFFFFF), Color(0x30E9F2FF))
+            else -> listOf(Color(0x22FFFFFF), Color(0x14E9F2FF))
         },
         start = Offset(0f, 0f),
         end = Offset(900f, 1600f)
@@ -260,6 +260,62 @@ fun Modifier.glassSurface(
     shape: Shape = Glass.CardShape,
     borderWidth: Dp = 1.dp
 ): Modifier = this.liquidGlass(dark, selected, shape, cornerOf(shape), borderWidth)
+
+
+/**
+ * 输入框 / 底栏专用「中心全透」液态玻璃：不铺任何半透明白基底，
+ * 只在轮廓内侧画折射柔光带 + 镜面高光 + 色散，中心 100% 透出整屏渐变。
+ * 这样从结构上不可能再出现一块独立的浅白矩形（真机截图里的「白色方框」）。
+ * 依旧是 drawWithCache 静态绘制、零逐帧模糊、零新增依赖。
+ */
+fun Modifier.edgeGlass(
+    dark: Boolean,
+    selected: Boolean = false,
+    shape: Shape = Glass.CardShape,
+    borderWidth: Dp = 1.dp,
+    centerTint: Color = Color.Transparent
+): Modifier = this
+    .clip(shape)
+    .drawWithCache {
+        val w = size.width
+        val h = size.height
+        val r = minOf(cornerOf(shape).toPx(), h / 2f, w / 2f)
+        val cr = CornerRadius(r, r)
+        val strokeW = borderWidth.toPx()
+        val bevel = 11.dp.toPx()
+        val endX = w.coerceAtLeast(1f)
+        val endY = h.coerceAtLeast(1f)
+        // 宽柔光带：沿轮廓内侧扩散，模拟边缘折射透镜（Stroke 一半在外被 clip 裁掉）
+        val softBand = Brush.linearGradient(
+            colors = listOf(
+                Glass.edgeColor(dark, soft = true),
+                Color.Transparent,
+                Glass.dispersionCyan(dark),
+                Color.Transparent,
+                Glass.dispersionPink(dark),
+                Glass.edgeColor(dark, soft = true)
+            ),
+            start = Offset(0f, 0f), end = Offset(endX, endY)
+        )
+        // 窄镜面高光：左上最强、右下几乎消失
+        val specular = Brush.linearGradient(
+            colors = listOf(
+                Color.White.copy(alpha = if (dark) 0.42f else 0.90f),
+                Color.White.copy(alpha = if (dark) 0.10f else 0.26f),
+                Color.White.copy(alpha = 0.02f)
+            ),
+            start = Offset(0f, 0f), end = Offset(endX * 0.9f, endY)
+        )
+        onDrawBehind {
+            if (centerTint != Color.Transparent) {
+                drawRoundRect(color = centerTint, cornerRadius = cr)
+            }
+            drawRoundRect(brush = softBand, cornerRadius = cr, style = Stroke(width = bevel * 2.6f))
+            drawRoundRect(brush = specular, cornerRadius = cr, style = Stroke(width = bevel))
+            drawRoundRect(brush = specular, cornerRadius = cr, style = Stroke(width = strokeW * 1.3f))
+        }
+    }
+    .border(borderWidth, Glass.highlightBorder(dark, selected), shape)
 
 /**
  * 液态玻璃按钮：在主题色渐变上加顶部弧形高光 + 边缘亮线，

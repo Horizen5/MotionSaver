@@ -1,10 +1,23 @@
-# 动态存 · MotionSaver 2.7
+# 动态存 · MotionSaver 2.7.1
 
 一个**全新自研、MIT 协议**的 Android 应用：粘贴分享链接（可一次多条）→ 解析出**图文 / 视频 / 音频 / 动图** → **点开直接预览** → 圆圈选中 → 下载 → 按**可自由组合的命名方案**落盘（默认文案 / 话题 + 短码去重）→ 动图合成为**小米相册可识别的单文件动态照片**。界面为 iOS 26 液态玻璃 + HyperOS 生命感美学。
 
 > 不含任何第三方商业应用的反编译源码，不逆向平台私有签名，不绕过鉴权，不预置第三方解析端点。详见 [DISCLAIMER.md](DISCLAIMER.md)。
 
-**2.7 更新（本次）：真·液态玻璃 · 命名方案自由组合**
+**2.7.1 更新（本次）：白框与底部分层的根因修复 · 真·中心全透**
+
+按用户真机截图复核，2.7.0 声称「白色方框已消失」并不成立。放大截图后确认那块白框是**四个直角、正好等于输入区 padding 之后的矩形**，不是控件自带容器；联网调研 Android 官方 edge-to-edge / system-bars 指南与多篇实践后，两个问题的真正根因如下。
+
+| 问题 | 真正根因 | 修复 |
+| --- | --- | --- |
+| **输入框直角白框** | 2.7.0 虽已把 `OutlinedTextField` 换成 `BasicTextField`（dex 反编译确认旧类确实不在），但输入区外层仍调用 `glassSurface`，其 `baseBrush` 会铺一层 `0x52FFFFFF` 半透明白基底；叠上 `decorationBox` 容器与 `shadow`，在浅色渐变上形成一块边界清晰的独立亮矩形 | 新增 `edgeGlass`：**中心 100% 透明**，只在轮廓内侧画折射柔光带 + 镜面高光 + 色散（`drawRoundRect` + `Stroke` 被 `clip` 裁掉外半）；去掉 `glassSurface` / `decorationBox` / 白基底，占位文字由外层 `Box` 直接绘制，`BasicTextField` 显式 `background(Color.Transparent)`。从结构上不可能再出现铺白矩形 |
+| **底部明显分层** | `themes.xml` 的 `windowBackground = #FFFAFAFE` 近白实色 + `enableEdgeToEdge()` 默认把 `isNavigationBarContrastEnforced = true`，系统在导航栏区强制盖一层浅色对比度 scrim，与 App 上方连续渐变横切出一条水平色带 | 官方方案：`SystemBarStyle.auto(TRANSPARENT, TRANSPARENT)` 让状态栏 / 导航栏全透明；在 `enableEdgeToEdge()` **之后**设 `window.isNavigationBarContrastEnforced = false`（该函数内部会置 true，顺序不能反）；`WindowCompat.setDecorFitsSystemWindows(false)`；主题加透明 `navigationBarColor` / `statusBarColor` 与 `enforceNavigationBarContrast=false`；`windowBackground` 改为与渐变起始色一致的 `#F4F6FE`；manifest 加 `adjustResize`。整屏渐变由此连续绘制到物理底部 |
+| **底栏同材质** | 底栏胶囊仍用铺白基底的 `glassSurface`，与背景有色差 | 改用 `edgeGlass`，仅保留极淡 `centerTint`（浅色 7% / 深色 4%）保证可读性，阴影由 16dp 降到 10dp |
+| **零开销不增包体** | — | 全部 `drawWithCache` 静态绘制、画笔按 size 缓存、零逐帧模糊、零新增依赖；release 包 **1,911,428 B**，比 2.7.0 仅多 84 B |
+
+**验证**：122 项 JVM 单测全绿（0 失败 / 0 错误）；`:core:test :app:assembleRelease` BUILD SUCCESSFUL；`aapt` 确认 versionCode 10 / 2.7.1、manifest 含 `adjustResize(0x10)`；`apksigner` 证书与 v2.7.0 一致可覆盖安装；dex 内含 `setNavigationBarContrastEnforced` / `setDecorFitsSystemWindows` 调用，确认运行时关闭 scrim 已编入成品。
+
+**2.7 更新：真·液态玻璃 · 命名方案自由组合**
 
 按用户截图反馈重做玻璃材质，并把命名方式从写死改成可由用户排列组合。联网调研了 Apple HIG Materials / WWDC25 219、Haze 2.1、AGSL SDF 折射等开源方案，结论是：液态玻璃的核心是**只在轮廓边缘折射光线、中心几乎清澈 + 沿轮廓的镜面高光 + 菲涅尔内发光 + 淡色散**，而不是均匀半透明白填充 —— 旧版整块 80% 白正是截图里「白色方框」的根因。
 
@@ -12,7 +25,7 @@
 | --- | --- |
 | **液态玻璃材质** | 重做 `Glass.kt`：`drawWithCache` 缓存画笔，叠加「边缘折射透镜带（中心全透）→ 左上淡青 / 右下淡粉色散 → 底部内阴影（厚度）→ 斜向镜面高光描边」四层；基底白降到 18~32%，背景彩色光晕与斜向焦散亮带透出来 |
 | **不引入大依赖** | Haze / AGSL / RenderEffect 均需 API 31+ 或逐帧 GPU 离屏缓冲，minSdk 26 会退化成 scrim 且掉帧；本版全部静态绘制、零新增依赖、零逐帧模糊，`drawWithCache` 保证 size 不变时画笔零重建 |
-| **白色方框消失** | 输入框从 `OutlinedTextField` 换成 `BasicTextField`：无内建容器 / 指示线，文字直接落在玻璃上，彻底融合 |
+| **白色方框（未彻底解决，2.7.1 修复）** | 本版把 `OutlinedTextField` 换成 `BasicTextField`，但外层 `glassSurface` 的半透明白基底仍在，真机上白框依旧存在；根因与彻底修复见上方 2.7.1 |
 | **底栏不再贴底** | 加 `navigationBarsPadding()` + 底部 24dp 悬浮间距，避开手势条 |
 | **按钮同材质** | 主按钮加顶部弧形高光 + 边缘亮线，与卡片同属液态玻璃，不再是实心色块 |
 | **命名方案可组合** | 「设置 → 命名方案」独立页：日期、时间、日期时间、序号、标题、作者、平台、作品 ID、短码、类型、话题共 11 个字段，自由勾选 / 上下排序 / 删除，5 种分隔符，4 组快捷预设，实时预览单文件与图集文件名 |
@@ -64,7 +77,7 @@
 | **2.6 收敛** | 上面「本地合成 GIF」能力现在**只对 ≥2 张静态帧的多图作品提供**：单张静态图没有第二帧，作品本身也不含动态片段，旧版对它生成动图属于假识别。UI 分组改名为「轮播动图（合成）」，【动态图】误导标签改为【实况图】，单图作品明确提示「不含动图」 |
 | **验证** | 108 项 JVM 单测全绿（0 失败 / 0 错误）；真实「沙龙月季」3 帧原图合成的 GIF 经 Pillow 严格逐帧解码通过（3 帧 / 3.6 s / 循环 0 / 三帧互不相同）；真机样本 `MVIMG_20261106_230518.jpg` 由**实际编译产物**解析出 `videoOffset=2993063 / videoLength=2990126 / 时间戳 910229`，与 Python 二进制实测一致 |
 
-> 最终安装包：`MotionSaver-2.7.0-release.apk`（versionCode 9 / versionName 2.7.0，沿用 debug keystore 签名，可直接覆盖安装旧版），**1,911,344 B ≈ 1.82 MiB**，SHA-256 `8da92f3a09e7be2fd5f04ebffbbebf038a3d306df3be54e7e40f891bf344eee0`，详见下方「交付」。APK 只走直链分发，不上传 GitHub。
+> 最终安装包：`MotionSaver-2.7.1-release.apk`（versionCode 10 / versionName 2.7.1，沿用 debug keystore 签名，可直接覆盖安装旧版），**1,911,428 B ≈ 1.82 MiB**，SHA-256 `1d366a9513ded02bd037af592c288f7cd113d8a8a3113070c867ce6888b5c866`，详见下方「交付」。APK 只走直链分发，不上传 GitHub。
 
 > 关于「60Hz」：Android 没有强制设置刷新率的公开 API（刷新率由系统与厂商显示策略管理），本版做的是向系统**请求**设备支持的最高刷新率档位，并消除掉帧来源（JIT、全量重组、大图解码 GC）。系统不允许时会静默回退，不影响功能。
 
@@ -104,16 +117,16 @@ python3 verify/verify_v22.py         # 真实网络端到端：两条链接 + �
 **安装包不走 GitHub**：手机浏览器打开工作台上传页，点顶部「下载并安装 APK」（即 `/apk` 直链）即可下载安装（需允许「未知来源」）。直链带访问凭据 `?sharecode=...`，完整入口在交付消息中给出，不写进公开仓库。
 minSdk 26 / targetSdk 35 / arm64-v8a / debug 签名。
 
-### 交付（v2.7.0 最终产物）
+### 交付（v2.7.1 最终产物）
 
 | 项 | 值 |
 | --- | --- |
-| 文件 | `MotionSaver-2.7.0-release.apk` |
-| 版本 | versionCode 9 / versionName 2.7.0 |
-| 体积 | 1,911,344 B（1.82 MiB / 1.911 MB），**< 10 MB** |
-| SHA-256 | `8da92f3a09e7be2fd5f04ebffbbebf038a3d306df3be54e7e40f891bf344eee0` |
-| 签名 | `CN=Android Debug`，证书 SHA-256 `ed2cd24a6da533c8a9d4541dc83ab96936e51072e0298f0b6b601356c3f32d9d`，与 v2.6.0 一致，可直接覆盖安装 |
-| 校验 | `aapt dump badging` 确认包名 `com.motionsaver.app` / 版本 / 权限；`apksigner verify` 通过；dex 内含「命名方案」「液态玻璃」「按日期归档」「short_code」「轮播动图」「不含可下载的动图」等 v2.7 字符串 |
+| 文件 | `MotionSaver-2.7.1-release.apk` |
+| 版本 | versionCode 10 / versionName 2.7.1 |
+| 体积 | 1,911,428 B（1.82 MiB / 1.911 MB），**< 10 MB** |
+| SHA-256 | `1d366a9513ded02bd037af592c288f7cd113d8a8a3113070c867ce6888b5c866` |
+| 签名 | `CN=Android Debug`，证书 SHA-256 `ed2cd24a6da533c8a9d4541dc83ab96936e51072e0298f0b6b601356c3f32d9d`，与 v2.7.0 一致，可直接覆盖安装 |
+| 校验 | `aapt dump badging` 确认包名 `com.motionsaver.app` / versionCode 10 / `adjustResize`；`apksigner verify` 通过；dex 内含「2.7.1」「无缝玻璃版」「命名方案」及 `setNavigationBarContrastEnforced` / `setDecorFitsSystemWindows` 调用 |
 | 下载 | 工作台 `/apk` 直链（带 sharecode，见交付消息），**不上传 GitHub** |
 
 **在手机上**：把链接或 2~3 条整段口令一起粘贴 → 点「① 解析」→ 每个作品一张卡，缩略图右上角圆圈选中（选中会浮起放大）→ 点图直接预览 → 卡右上角方框一键全选 → 需要时打开「提取音频」→ 点「② 下载选中」。
