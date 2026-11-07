@@ -10,56 +10,58 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
 /**
- * HyperOS / MIUI「生命感美学」主题：大圆角、通透蓝紫主色、字重字号跳跃。
- * 玻璃质感的实际绘制在 [Glass] 里，这里只负责 Material3 色板与形状，
- * 保证 Button / Switch / TextField 等系统组件自动跟随新风格。
+ * MIUI / HyperOS 实色风格主题：纯浅灰底 + 白色实色圆角卡片 + HyperOS 蓝强调色。
+ * 材质实际绘制在 [Glass] 里，这里只负责 Material3 色板与形状，
+ * 保证 Button / Switch / Checkbox / TextField 等系统组件自动跟随新风格，
+ * 不再出现半透明玻璃与系统控件默认色叠加出的白色方块。
  */
 private val LightColors = lightColorScheme(
     primary = Glass.Accent,
     onPrimary = Color.White,
-    primaryContainer = Color(0xFFE4E8FF),
-    onPrimaryContainer = Color(0xFF202A63),
+    primaryContainer = Color(0xFFDCEBFF),
+    onPrimaryContainer = Color(0xFF0A3D78),
     secondary = Glass.Accent2,
     onSecondary = Color.White,
-    secondaryContainer = Color(0xFFEEE6FF),
-    onSecondaryContainer = Color(0xFF35235F),
+    secondaryContainer = Color(0xFFE8F0FD),
+    onSecondaryContainer = Color(0xFF123A6B),
     tertiary = Glass.AccentMint,
     surface = Color.White,
-    surfaceVariant = Color(0xFFEFF1FB),
-    background = Color(0xFFF4F6FE),
-    onSurface = Color(0xFF1C2340),
-    onSurfaceVariant = Color(0xFF64708F),
-    outline = Color(0xFFC9CFE6),
+    surfaceVariant = Color(0xFFF0F2F6),
+    background = Color(0xFFF4F6F9),
+    onSurface = Color(0xFF1B1E26),
+    onSurfaceVariant = Color(0xFF6B7280),
+    outline = Color(0xFFD7DBE3),
     error = Color(0xFFE5484D),
     errorContainer = Color(0xFFFFE4E6)
 )
 
 private val DarkColors = darkColorScheme(
-    primary = Color(0xFF9AA8FF),
-    onPrimary = Color(0xFF141A3A),
-    primaryContainer = Color(0xFF2C3670),
-    onPrimaryContainer = Color(0xFFE0E6FF),
-    secondary = Color(0xFFC0A4FF),
-    onSecondary = Color(0xFF2A1A4A),
-    secondaryContainer = Color(0xFF3A2C63),
-    tertiary = Color(0xFF6FDCCB),
-    surface = Color(0xFF171B29),
-    surfaceVariant = Color(0xFF222840),
-    background = Color(0xFF10131C),
-    onSurface = Color(0xFFF2F4FF),
-    onSurfaceVariant = Color(0xFFAAB4D2),
-    outline = Color(0xFF39415C),
+    primary = Color(0xFF82B0FF),
+    onPrimary = Color(0xFF0A2547),
+    primaryContainer = Color(0xFF22466F),
+    onPrimaryContainer = Color(0xFFDCEBFF),
+    secondary = Color(0xFF6FA0FF),
+    onSecondary = Color(0xFF0A2547),
+    secondaryContainer = Color(0xFF1C3A60),
+    onSecondaryContainer = Color(0xFFDCEBFF),
+    tertiary = Color(0xFFFF8A3D),
+    surface = Color(0xFF24272E),
+    surfaceVariant = Color(0xFF2E323B),
+    background = Color(0xFF15171C),
+    onSurface = Color(0xFFF1F3F7),
+    onSurfaceVariant = Color(0xFFA8AEB9),
+    outline = Color(0xFF3C414B),
     error = Color(0xFFFF8A8E),
     errorContainer = Color(0xFF5A2226)
 )
 
-/** 大圆角哲学：卡片 24-28dp、按钮胶囊、磁贴 20dp。 */
+/** MIUI 圆角哲学：卡片 18dp、磁贴 14dp、按钮胶囊。 */
 private val AppShapes = Shapes(
-    extraSmall = RoundedCornerShape(10.dp),
-    small = RoundedCornerShape(14.dp),
-    medium = RoundedCornerShape(20.dp),
-    large = RoundedCornerShape(26.dp),
-    extraLarge = RoundedCornerShape(32.dp)
+    extraSmall = RoundedCornerShape(8.dp),
+    small = RoundedCornerShape(12.dp),
+    medium = RoundedCornerShape(18.dp),
+    large = RoundedCornerShape(22.dp),
+    extraLarge = RoundedCornerShape(28.dp)
 )
 
 private val AppTypography = Typography(

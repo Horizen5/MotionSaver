@@ -9,251 +9,116 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.drawWithCache
-import androidx.compose.ui.geometry.CornerRadius
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
 /**
- * iOS 26「Liquid Glass」+ HyperOS「生命感美学」的零依赖静态实现。
+ * MIUI / HyperOS 实色风格材质层。
  *
- * 调研结论（Apple HIG Materials / WWDC25 219、Haze 2.1、AGSL SDF 折射方案）：
- * 苹果的液态玻璃**不是**「均匀半透明白色填充」，而是
- *   1. 只在轮廓边缘 8~16px 的 bevel 带内折射光线，中心几乎清澈；
- *   2. 沿轮廓的镜面高光（specular），偏左上光源，随几何与交互移动；
- *   3. 掠射角更亮的菲涅尔边缘（Fresnel rim）+ 顶部内发光（inner glow）；
- *   4. 边缘极淡的色散（青 / 粉），以及把玻璃「压」在内容上的柔和阴影。
- * 旧版把整块卡片涂成 80% 白，正是用户截图里「白色方框、不融合」的根因。
+ * 用户多轮真机反馈确认：iOS 液态玻璃那套「半透明白基底 + 折射 / 菲涅尔描边」
+ * 在浅色主题下始终会显出一块与背景不融合的白色方框，底部导航还会带一圈
+ * 描边色带。本版彻底放弃半透明 / 折射 / 光晕 / 色散，改为 MIUI 的标准做法：
+ *   - 背景：纯浅灰（无彩色渐变、无光晕），整屏连续铺到物理底部；
+ *   - 卡片：100% 实色白（深色为深灰），18dp 圆角，极淡描边 + 柔和阴影；
+ *   - 主色：HyperOS 蓝，次要色：小米橙；按钮 / 开关 / 输入框统一实色；
+ *   - 选中态：淡蓝实色底，而非高光玻璃。
+ * 这样所有卡片边界一致、层次规整，「白框」不再是缺陷而是设计本身；
+ * 底部也不再有半透明层与系统栏叠加出的分层。
  *
- * 为什么仍然不用真正的 backdrop-blur：
- *  - Compose Modifier.blur / RenderEffect 需 API 31+，Haze / AGSL 方案在低版本
- *    同样退化为 scrim；app minSdk 26，全版本一致比局部更好更重要；
- *  - 实时模糊逐帧走 GPU 离屏缓冲，滚动掉帧、增包体，与「高刷极致优化」冲突。
- *
- * 这里用 drawWithCache 一次性构建并缓存所有渐变画笔（size 不变时零重建），
- * 多层 drawRoundRect 叠加出折射 / 高光 / 色散 / 厚度：静态、零逐帧模糊、
- * 零新增依赖、R8 后仅几 KB，包体稳定在 10MB 内。
+ * 全部为静态绘制，零逐帧模糊、零新增依赖，包体保持 10MB 内。
+ * 保持所有对外接口签名不变，AppUi 数十处调用点无需改动即可整体换风格。
  */
 object Glass {
 
-    val BgLight = listOf(Color(0xFFF4F6FE), Color(0xFFE9EDFC), Color(0xFFF8F0FA))
-    val BgDark = listOf(Color(0xFF0E111A), Color(0xFF141827), Color(0xFF1B1526))
+    /** 纯中性背景：浅灰白 / 近黑，极淡竖向渐变只为保证接口返回 Brush，不含彩色光晕。 */
+    val BgLight = listOf(Color(0xFFF6F7F9), Color(0xFFEFF1F5))
+    val BgDark = listOf(Color(0xFF15171C), Color(0xFF101216))
 
-    val Accent = Color(0xFF5B6CF0)
-    val Accent2 = Color(0xFF8A6BF2)
-    val AccentMint = Color(0xFF37C2B0)
+    /** HyperOS 蓝 + 小米橙：与之前的紫罗兰玻璃明确区分。 */
+    val Accent = Color(0xFF3485FF)
+    val Accent2 = Color(0xFF0A6CFF)
+    val AccentMint = Color(0xFFFF6900)
 
-    private val GlowBlue = Color(0xFF6E8BFF)
-    private val GlowPurple = Color(0xFFB57BFF)
-    private val GlowPink = Color(0xFFFF9EC7)
-    private val GlowMint = Color(0xFF7CE0D3)
-    private val DispCyan = Color(0xFF7CE0FF)
-    private val DispPink = Color(0xFFFF9ED8)
-    private val InnerShade = Color(0xFF5B6488)
-
-    /** 全屏背景：柔和渐变 + 彩色光晕，形成「透过玻璃看到壁纸」的层次。 */
-    fun backgroundBrush(dark: Boolean): Brush = Brush.linearGradient(
-        colors = if (dark) BgDark else BgLight,
-        start = Offset(0f, 0f),
-        end = Offset(1400f, 2400f)
+    /** 整屏背景：只有一层纯色，没有光晕、焦散、壁纸透视。 */
+    fun backgroundBrush(dark: Boolean): Brush = Brush.verticalGradient(
+        colors = if (dark) BgDark else BgLight
     )
 
-    /**
-     * 背景光晕层：radialGradient 天生就是柔化的光斑，等价于「已经模糊过的背景」，
-     * 不需要运行时 blur；再加一道斜向焦散亮带，模拟光穿过玻璃的流动感。
-     */
     @Composable
     fun GlowBackground(dark: Boolean) {
-        val a = if (dark) 0.26f else 0.34f
-        Box(Modifier.fillMaxSize().background(backgroundBrush(dark))) {
-            Box(Modifier.fillMaxSize().background(
-                Brush.radialGradient(
-                    listOf(GlowBlue.copy(alpha = a), Color.Transparent),
-                    center = Offset(180f, 240f), radius = 980f
-                )
-            ))
-            Box(Modifier.fillMaxSize().background(
-                Brush.radialGradient(
-                    listOf(GlowPurple.copy(alpha = a * 0.9f), Color.Transparent),
-                    center = Offset(940f, 600f), radius = 880f
-                )
-            ))
-            Box(Modifier.fillMaxSize().background(
-                Brush.radialGradient(
-                    listOf(GlowPink.copy(alpha = a * 0.75f), Color.Transparent),
-                    center = Offset(300f, 1480f), radius = 940f
-                )
-            ))
-            Box(Modifier.fillMaxSize().background(
-                Brush.radialGradient(
-                    listOf(GlowMint.copy(alpha = a * 0.66f), Color.Transparent),
-                    center = Offset(980f, 1980f), radius = 820f
-                )
-            ))
-            // 斜向焦散亮带：玻璃把背景光聚成一道柔和的高光流
-            Box(Modifier.fillMaxSize().background(
-                Brush.linearGradient(
-                    colors = listOf(
-                        Color.Transparent,
-                        Color.White.copy(alpha = if (dark) 0.05f else 0.16f),
-                        Color.Transparent
-                    ),
-                    start = Offset(0f, 520f),
-                    end = Offset(1080f, 1720f)
-                )
-            ))
-        }
+        Box(Modifier.fillMaxSize().background(backgroundBrush(dark)))
     }
 
-    /**
-     * 玻璃基底：中心接近透明、只带极轻的 tint，让背景彩色光晕透出来。
-     * 亮度集中在边缘（由 [liquidGlass] 的折射层负责），不再是整块白。
-     */
+    /** 实色卡片基底：浅色纯白 / 深色深灰；选中态为淡蓝实色。 */
     fun baseBrush(dark: Boolean, selected: Boolean = false): Brush = Brush.linearGradient(
         colors = when {
-            selected && dark -> listOf(Color(0x3A5B72FF), Color(0x2C2B3F70))
-            selected -> listOf(Color(0x6FC3D8FF), Color(0x5AA6D4FF))
-            dark -> listOf(Color(0x33222B42), Color(0x24191F30))
-            else -> listOf(Color(0x22FFFFFF), Color(0x14E9F2FF))
-        },
-        start = Offset(0f, 0f),
-        end = Offset(900f, 1600f)
+            selected && dark -> listOf(Color(0xFF2B3A55), Color(0xFF2B3A55))
+            selected -> listOf(Color(0xFFE7F1FF), Color(0xFFE7F1FF))
+            dark -> listOf(Color(0xFF24272E), Color(0xFF24272E))
+            else -> listOf(Color.White, Color.White)
+        }
     )
 
-    /** 兼容旧调用点（缩略图占位 / 消息卡）：与玻璃基底保持一致，避免再出现白块。 */
+    /** 兼容旧调用点（缩略图占位 / 消息卡）：与卡片基底同为实色。 */
     fun surfaceBrush(dark: Boolean, selected: Boolean = false): Brush = baseBrush(dark, selected)
 
-    private fun edgeTint(dark: Boolean): Color = if (dark) Color(0xFFB7C6FF) else Color.White
-
-    /** 胶囊形主按钮渐变。 */
+    /** 主按钮（HyperOS 蓝）与次按钮（小米橙）实色渐变；名字沿用旧接口。 */
     val accentBrush: Brush = Brush.horizontalGradient(listOf(Accent, Accent2))
-    val accentBrushMint: Brush = Brush.horizontalGradient(listOf(Color(0xFF3FBFAE), Accent))
+    val accentBrushMint: Brush = Brush.horizontalGradient(listOf(Color(0xFFFF8A3D), Color(0xFFFF6900)))
 
-    val CardShape: Shape = RoundedCornerShape(26.dp)
-    val TileShape: Shape = RoundedCornerShape(20.dp)
+    /** MIUI 圆角：卡片 18dp、磁贴 14dp、按钮胶囊。 */
+    val CardShape: Shape = RoundedCornerShape(18.dp)
+    val TileShape: Shape = RoundedCornerShape(14.dp)
     val PillShape: Shape = RoundedCornerShape(50)
 
-    /**
-     * 镜面高光描边：左上强、右下弱的斜向渐变，是液态玻璃辨识度最高的细节。
-     * 苹果默认的「无边框」其实来自光照高光，不是描一条实线。
-     */
+    /** 极淡实色描边：浅色用浅灰、深色用淡白，选中用主色；不再是白色高光。 */
     fun highlightBorder(dark: Boolean, selected: Boolean = false): Brush = Brush.linearGradient(
-        colors = listOf(
-            when {
-                selected -> Color.White.copy(alpha = 0.80f)
-                dark -> Color.White.copy(alpha = 0.30f)
-                else -> Color.White.copy(alpha = 0.88f)
-            },
-            when {
-                selected -> Accent.copy(alpha = 0.32f)
-                dark -> Color.White.copy(alpha = 0.05f)
-                else -> Color.White.copy(alpha = 0.14f)
-            }
-        ),
-        start = Offset(0f, 0f),
-        end = Offset(700f, 1200f)
+        colors = when {
+            selected -> listOf(Accent.copy(alpha = 0.55f), Accent.copy(alpha = 0.28f))
+            dark -> listOf(Color(0x1AFFFFFF), Color(0x0AFFFFFF))
+            else -> listOf(Color(0x14000000), Color(0x08000000))
+        }
     )
 
     fun onGlass(dark: Boolean): Color =
-        if (dark) Color(0xFFF2F4FF) else Color(0xFF1C2340)
+        if (dark) Color(0xFFF1F3F7) else Color(0xFF1B1E26)
 
     fun onGlassSub(dark: Boolean): Color =
-        if (dark) Color(0xA9C6D2F2) else Color(0x9A60709A)
+        if (dark) Color(0xFF9AA0AC) else Color(0xFF8A9099)
 
-    internal fun dispersionCyan(dark: Boolean): Color = DispCyan.copy(alpha = if (dark) 0.10f else 0.17f)
-    internal fun dispersionPink(dark: Boolean): Color = DispPink.copy(alpha = if (dark) 0.08f else 0.14f)
-    internal fun innerShade(dark: Boolean): Color = InnerShade.copy(alpha = if (dark) 0.20f else 0.11f)
-    internal fun edgeColor(dark: Boolean, soft: Boolean): Color =
-        edgeTint(dark).copy(alpha = if (dark) (if (soft) 0.10f else 0.30f) else (if (soft) 0.16f else 0.52f))
+    // 以下保留旧接口以兼容潜在调用，实色风格下均返回近乎不可见的中性色。
+    internal fun dispersionCyan(dark: Boolean): Color = Color.Transparent
+    internal fun dispersionPink(dark: Boolean): Color = Color.Transparent
+    internal fun innerShade(dark: Boolean): Color = Color.Transparent
+    internal fun edgeColor(dark: Boolean, soft: Boolean): Color = Color.Transparent
 }
 
 /**
- * 液态玻璃主体：多层静态渐变叠加出「边缘折射 + 镜面高光 + 色散 + 厚度」。
- * 所有画笔在 drawWithCache 中按 size 构建并缓存；无动画、无离屏缓冲、无逐帧模糊。
+ * MIUI 实色卡片：裁剪圆角 → 铺实色底 → 极淡描边。
+ * 不再有任何 drawWithCache 折射 / 高光 / 色散层。
  */
 fun Modifier.liquidGlass(
     dark: Boolean,
     selected: Boolean = false,
     shape: Shape = Glass.CardShape,
-    corner: Dp = 26.dp,
+    corner: Dp = 18.dp,
     borderWidth: Dp = 1.dp
 ): Modifier = this
     .clip(shape)
     .background(Glass.baseBrush(dark, selected), shape)
-    .drawWithCache {
-        val w = size.width
-        val h = size.height
-        val r = minOf(corner.toPx(), h / 2f, w / 2f)
-        val cr = CornerRadius(r, r)
-        val maxDim = maxOf(w, h)
-        val center = Offset(w / 2f, h / 2f)
-        val strokeW = borderWidth.toPx()
-
-        // 1) 折射透镜带：中心完全清澈，只在靠近轮廓处逐渐聚光
-        val lens = Brush.radialGradient(
-            colors = listOf(
-                Color.Transparent, Color.Transparent, Color.Transparent,
-                Glass.edgeColor(dark, soft = true),
-                Glass.edgeColor(dark, soft = false)
-            ),
-            center = center,
-            radius = maxDim * 0.72f
-        )
-        // 2) 色散：左上淡青、右下淡粉，极淡，仅在边缘可感知
-        val dispA = Brush.radialGradient(
-            listOf(Glass.dispersionCyan(dark), Color.Transparent),
-            center = Offset(0f, 0f), radius = maxDim * 0.55f
-        )
-        val dispB = Brush.radialGradient(
-            listOf(Glass.dispersionPink(dark), Color.Transparent),
-            center = Offset(w, h), radius = maxDim * 0.55f
-        )
-        // 3) 底部内阴影：给玻璃「厚度」，让它像浮在内容之上的实物
-        val inner = Brush.verticalGradient(
-            colors = listOf(
-                Color.Transparent, Color.Transparent, Color.Transparent,
-                Glass.innerShade(dark)
-            ),
-            startY = 0f, endY = h
-        )
-        // 4) 镜面高光沿轮廓扫光：左上最强，右下几乎消失
-        val specular = Brush.linearGradient(
-            colors = listOf(
-                Color.White.copy(alpha = if (dark) 0.44f else 0.92f),
-                Color.White.copy(alpha = if (dark) 0.12f else 0.30f),
-                Color.White.copy(alpha = 0.02f)
-            ),
-            start = Offset(0f, 0f),
-            end = Offset(w * 0.85f, h.coerceAtLeast(1f))
-        )
-
-        onDrawBehind {
-            drawRoundRect(brush = lens, cornerRadius = cr)
-            drawRoundRect(brush = dispA, cornerRadius = cr)
-            drawRoundRect(brush = dispB, cornerRadius = cr)
-            drawRoundRect(brush = inner, cornerRadius = cr)
-            drawRoundRect(
-                brush = specular,
-                cornerRadius = cr,
-                style = Stroke(width = strokeW * 1.7f)
-            )
-        }
-    }
     .border(borderWidth, Glass.highlightBorder(dark, selected), shape)
 
-/** 形状 → 圆角半径；胶囊用极大值，绘制时自动收敛到 h/2。 */
+/** 形状 → 圆角半径；胶囊用极大值。 */
 private fun cornerOf(shape: Shape): Dp = when {
     shape === Glass.PillShape -> 999.dp
-    shape === Glass.TileShape -> 20.dp
-    else -> 26.dp
+    shape === Glass.TileShape -> 14.dp
+    else -> 18.dp
 }
 
-/** 玻璃容器：所有既有调用点无需改动即可获得新的液态玻璃材质。 */
+/** 实色容器：所有既有调用点无需改动即可获得 MIUI 卡片。 */
 fun Modifier.glassSurface(
     dark: Boolean,
     selected: Boolean = false,
@@ -261,13 +126,13 @@ fun Modifier.glassSurface(
     borderWidth: Dp = 1.dp
 ): Modifier = this.liquidGlass(dark, selected, shape, cornerOf(shape), borderWidth)
 
-
 /**
- * 输入框 / 底栏专用「中心全透」液态玻璃：不铺任何半透明白基底，
- * 只在轮廓内侧画折射柔光带 + 镜面高光 + 色散，中心 100% 透出整屏渐变。
- * 这样从结构上不可能再出现一块独立的浅白矩形（真机截图里的「白色方框」）。
- * 依旧是 drawWithCache 静态绘制、零逐帧模糊、零新增依赖。
+ * 输入框 / 底栏专用：同样改为 100% 实色卡片。
+ * 旧版这里「中心全透 + 边缘白色高光」正是截图里那圈白色方框的来源；
+ * 现在整块是纯白圆角卡片，边界与所有其它卡片一致，彻底融合。
+ * centerTint 参数保留以兼容旧调用，实色风格不使用。
  */
+@Suppress("UNUSED_PARAMETER")
 fun Modifier.edgeGlass(
     dark: Boolean,
     selected: Boolean = false,
@@ -276,80 +141,18 @@ fun Modifier.edgeGlass(
     centerTint: Color = Color.Transparent
 ): Modifier = this
     .clip(shape)
-    .drawWithCache {
-        val w = size.width
-        val h = size.height
-        val r = minOf(cornerOf(shape).toPx(), h / 2f, w / 2f)
-        val cr = CornerRadius(r, r)
-        val strokeW = borderWidth.toPx()
-        val bevel = 11.dp.toPx()
-        val endX = w.coerceAtLeast(1f)
-        val endY = h.coerceAtLeast(1f)
-        // 宽柔光带：沿轮廓内侧扩散，模拟边缘折射透镜（Stroke 一半在外被 clip 裁掉）
-        val softBand = Brush.linearGradient(
-            colors = listOf(
-                Glass.edgeColor(dark, soft = true),
-                Color.Transparent,
-                Glass.dispersionCyan(dark),
-                Color.Transparent,
-                Glass.dispersionPink(dark),
-                Glass.edgeColor(dark, soft = true)
-            ),
-            start = Offset(0f, 0f), end = Offset(endX, endY)
-        )
-        // 窄镜面高光：左上最强、右下几乎消失
-        val specular = Brush.linearGradient(
-            colors = listOf(
-                Color.White.copy(alpha = if (dark) 0.42f else 0.90f),
-                Color.White.copy(alpha = if (dark) 0.10f else 0.26f),
-                Color.White.copy(alpha = 0.02f)
-            ),
-            start = Offset(0f, 0f), end = Offset(endX * 0.9f, endY)
-        )
-        onDrawBehind {
-            if (centerTint != Color.Transparent) {
-                drawRoundRect(color = centerTint, cornerRadius = cr)
-            }
-            drawRoundRect(brush = softBand, cornerRadius = cr, style = Stroke(width = bevel * 2.6f))
-            drawRoundRect(brush = specular, cornerRadius = cr, style = Stroke(width = bevel))
-            drawRoundRect(brush = specular, cornerRadius = cr, style = Stroke(width = strokeW * 1.3f))
-        }
-    }
+    .background(if (dark) Color(0xFF24272E) else Color.White, shape)
     .border(borderWidth, Glass.highlightBorder(dark, selected), shape)
 
-/**
- * 液态玻璃按钮：在主题色渐变上加顶部弧形高光 + 边缘亮线，
- * 让主操作按钮与卡片是同一种材质，而不是一块实心塑料色。
- */
+/** MIUI 实心按钮：纯色填充，无顶部弧形高光、无边缘亮线。 */
 fun Modifier.liquidButton(
     brush: Brush,
     shape: Shape = Glass.PillShape
 ): Modifier = this
     .clip(shape)
     .background(brush, shape)
-    .drawWithCache {
-        val w = size.width
-        val h = size.height
-        val cr = CornerRadius(h / 2f, h / 2f)
-        val topSheen = Brush.verticalGradient(
-            colors = listOf(
-                Color.White.copy(alpha = 0.34f),
-                Color.White.copy(alpha = 0.08f),
-                Color.Transparent
-            ),
-            startY = 0f, endY = h * 0.62f
-        )
-        val rim = Brush.linearGradient(
-            colors = listOf(Color.White.copy(alpha = 0.55f), Color.White.copy(alpha = 0.04f)),
-            start = Offset(0f, 0f), end = Offset(w, h)
-        )
-        onDrawBehind {
-            drawRoundRect(brush = topSheen, cornerRadius = cr)
-            drawRoundRect(brush = rim, cornerRadius = cr, style = Stroke(width = 1.2f * density))
-        }
-    }
 
-/** 便捷：把内容包进一层玻璃卡片（阴影由调用方 elevation 控制）。 */
+/** 便捷：把内容包进一层实色卡片（阴影由调用方 elevation 控制）。 */
 @Composable
 fun GlassBox(
     dark: Boolean,

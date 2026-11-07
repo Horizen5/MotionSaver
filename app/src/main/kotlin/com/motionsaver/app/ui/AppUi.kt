@@ -81,8 +81,8 @@ fun AppRoot(
     }
 
     val dark = isSystemInDarkTheme()
-    // 全屏彩色光晕作「壁纸」，上面的顶栏 / 卡片 / 底栏是半透明柔光玻璃，
-    // 形成 HyperOS 4 要求的 ≥2 层玻璃层次；静态绘制，不逐帧模糊。
+    // MIUI / HyperOS 实色风格：纯浅灰底 + 白色实色圆角卡片，
+    // 无玻璃、无光晕、无折射，卡片边界统一，静态绘制不增开销。
     Box(Modifier.fillMaxSize()) {
         Glass.GlowBackground(dark)
         Scaffold(
@@ -125,7 +125,7 @@ fun AppRoot(
     }
 }
 
-/** 胶囊形柔光玻璃底栏：选中项是主题色玻璃胶囊，未选中透明。 */
+/** MIUI 实色底栏：白色实色圆角卡片，选中项为 HyperOS 蓝胶囊。 */
 @Composable
 private fun GlassNavBar(dark: Boolean, tab: Int, onSelect: (Int) -> Unit) {
     Box(
@@ -223,10 +223,8 @@ private fun HomeScreen(state: MainUiState, vm: MainViewModel) {
 
         item(key = "input_field") {
             val dark = isSystemInDarkTheme()
-            // 中心 100% 透明：只保留轮廓边缘的折射柔光带与镜面高光，不铺任何半透明白基底。
-            // 旧版把 baseBrush 铺满整块、又叠了 decorationBox 容器，在浅色渐变上
-            // 显出一块边界清晰的浅白矩形（真机截图里的「白色方框」）；现在结构性消除：
-            //   edgeGlass 中心全透 + 去掉 decorationBox + BasicTextField 显式透明背景。
+            // MIUI 实色输入框：整块为纯白圆角卡片（edgeGlass），边界与所有卡片一致。
+            // 不再有半透明玻璃 / 折射高光，从结构上消除「白色方框与背景不融合」。
             Box(
                 Modifier
                     .fillMaxWidth()
@@ -264,7 +262,7 @@ private fun HomeScreen(state: MainUiState, vm: MainViewModel) {
         item(key = "action_row") {
             val dark = isSystemInDarkTheme()
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                // 胶囊渐变主按钮：柔和大阴影 + 主题色渐变，HyperOS 胶囊哲学
+                // MIUI 实色胶囊主按钮：柔和阴影 + 主题色实色填充
                 Box(
                     Modifier
                         .weight(1f)
@@ -308,12 +306,12 @@ private fun HomeScreen(state: MainUiState, vm: MainViewModel) {
 
         if (state.message.isNotEmpty()) {
             item(key = "message") {
-                // 消息条保留语义色（错误红/成功青），保证可读性；只套大圆角玻璃描边
+                // MIUI 消息卡：错误红实色底 / 成功白底，统一实色圆角卡片
                 val dark = isSystemInDarkTheme()
                 Card(
                     colors = CardDefaults.cardColors(
                         containerColor = if (state.isError) MaterialTheme.colorScheme.errorContainer
-                        else Color.Transparent
+                        else if (dark) Color(0xFF24272E) else Color.White
                     ),
                     shape = Glass.TileShape,
                     modifier = Modifier.fillMaxWidth()
@@ -849,13 +847,14 @@ private fun SettingsScreen(state: MainUiState, vm: MainViewModel) {
         Text("设置", style = MaterialTheme.typography.titleLarge, color = Glass.onGlass(dark))
         GlassBox(dark, modifier = Modifier.fillMaxWidth().padding(1.dp), shape = Glass.TileShape) {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text("MotionSaver 2.7.1 · 无缝玻璃版", fontWeight = FontWeight.Bold,
+                Text("MotionSaver 2.8.0 · MIUI 实色风格版", fontWeight = FontWeight.Bold,
                     color = Glass.onGlass(dark))
                 Text(
                     "粘贴链接 → 解析 → 点缩略图预览 → 圆圈选中 → 下载。" +
                         "解析结果页可直接切换「提取音频」与全选。\n" +
-                        "iOS 26 液态玻璃 + HyperOS 生命感美学：边缘折射、镜面高光、菲涅尔内发光；" +
-                        "命名方案可自由组合。单图作品不再误报动图。release：R8 全量优化 + Baseline Profile AOT。",
+                        "MIUI / HyperOS 实色风格：纯浅灰底 + 白色实色圆角卡片 + HyperOS 蓝，" +
+                        "无玻璃无光晕、层次干净；命名方案可自由组合。单图作品不再误报动图。" +
+                        "release：R8 全量优化 + Baseline Profile AOT。",
                     style = MaterialTheme.typography.bodySmall,
                     color = Glass.onGlassSub(dark)
                 )
@@ -972,7 +971,7 @@ private fun AdvancedSettingsScreen(
         InfoRow("画质", "图集自动选最高质量 JPEG 候选，排除水印与缩放模板；多 CDN 直链自动回退")
         InfoRow("动态照片", "JPEG + 尾部 MP4 + XMP 偏移元数据，字节级无损拼接")
         InfoRow("架构", "core 纯 JVM 核心库（单测全绿）+ app Compose 层；arm64-v8a；minSdk 26")
-        InfoRow("性能", "release + R8 全量优化 + Baseline Profile AOT；请求设备高刷新率；液态玻璃为静态渐变、drawWithCache 缓存画笔、零逐帧模糊")
+        InfoRow("性能", "release + R8 全量优化 + Baseline Profile AOT；请求设备高刷新率；MIUI 实色卡片为纯静态绘制、零玻璃零模糊、零新增依赖")
         Spacer(Modifier.height(8.dp))
     }
 }
