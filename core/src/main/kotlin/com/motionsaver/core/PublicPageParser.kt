@@ -140,7 +140,14 @@ abstract class PublicPageParser : MediaParser {
                 )
                 repeat(3) { add(h) }
             }
-            repeat(2) { add(seoHeaders) }
+            // 爬虫 UA 也带上访客 Cookie：实测无 Cookie 的爬虫请求会被重定向到
+            // www.douyin.com/note/{id} 并返回 404 空壳，白白浪费两次重试。
+            repeat(2) {
+                add(
+                    if (visitor.isNotBlank()) seoHeaders + mapOf("Cookie" to "ttwid=$visitor")
+                    else seoHeaders
+                )
+            }
             add(fetchHeaders)
         }
 
@@ -497,7 +504,7 @@ abstract class PublicPageParser : MediaParser {
                 warnings.add("平台状态 $filterReason：${filterReasonText(filterReason)}，公开页未返回任何图片或视频地址。")
                 warnings.add("这不是解析失败、也与 App 版本无关：换一个已公开的作品即可正常解析，或等作品审核通过后再试。")
             } else {
-                warnings.add("该公开页没有暴露可下载的媒体地址（平台返回了未渲染的页面壳）。")
+                warnings.add("该公开页没有暴露可下载的媒体地址。")
                 warnings.add("已自动切换多种公开取页策略并重试；仍失败时可在「设置 → 高级设置 → 解析端点」填入你自己的合规数据源。")
             }
         }

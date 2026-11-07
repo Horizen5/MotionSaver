@@ -417,13 +417,9 @@ private fun ResultCard(
                 Switch(checked = state.extractAudio, onCheckedChange = onSetExtractAudio)
             }
 
-            if (groups.isEmpty() && !p.isLivePhoto) {
-                Text(
-                    "本次未拿到媒体地址：平台返回了未渲染的页面壳，已自动切换多种公开取页策略并重试。可再点一次解析，或在高级设置里填入自己的解析端点。",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.error
-                )
-            }
+            // 空结果的原因只由解析层 warnings 给出（平台审核未通过 / 页面空壳 /
+            // 端点失败各不相同）。这里不再写死「未渲染的页面壳」，避免与下方
+            // 真实状态提示自相矛盾、把平台明确拒绝误说成 App 解析失败。
 
             groups.forEach { (title, list) ->
                 Text("$title（${list.size}）", fontWeight = FontWeight.SemiBold,
@@ -847,14 +843,15 @@ private fun SettingsScreen(state: MainUiState, vm: MainViewModel) {
         Text("设置", style = MaterialTheme.typography.titleLarge, color = Glass.onGlass(dark))
         GlassBox(dark, modifier = Modifier.fillMaxWidth().padding(1.dp), shape = Glass.TileShape) {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text("MotionSaver 2.8.1 · 回退解析版", fontWeight = FontWeight.Bold,
+                Text("MotionSaver 2.8.2 · 端到端验证版", fontWeight = FontWeight.Bold,
                     color = Glass.onGlass(dark))
                 Text(
                     "粘贴链接 → 解析 → 点缩略图预览 → 圆圈选中 → 下载。" +
                         "解析结果页可直接切换「提取音频」与全选。\n" +
                         "解析已回到前两个版本的取数方式：短链归一到 /share/note/{id}/，" +
                         "用公开访客 Cookie 直取 _ROUTER_DATA，并保留完整参数地址重试。" +
-                        "平台明确返回「审核未通过/暂不公开」时会如实提示，不再误报成解析失败。\n" +
+                        "平台明确返回「审核未通过/暂不公开」时会如实提示，不再误报成解析失败；" +
+                        "空结果的原因统一由解析层给出，界面不再出现互相矛盾的旧提示。\n" +
                         "MIUI / HyperOS 实色风格：纯浅灰底 + 白色实色圆角卡片 + HyperOS 蓝，" +
                         "无玻璃无光晕、层次干净；命名方案可自由组合。单图作品不再误报动图。" +
                         "release：R8 全量优化 + Baseline Profile AOT。",

@@ -4,6 +4,24 @@
 
 > 不含任何第三方商业应用的反编译源码，不逆向平台私有签名，不绕过鉴权，不预置第三方解析端点。详见 [DISCLAIMER.md](DISCLAIMER.md)。
 
+## 2.8.2 更新：端到端真实验证 + 清掉矛盾提示
+
+用户要求「你不能验证一下吗」。这次不再只用 curl 测服务端，而是新增 `RealNetworkVerify`：
+用**编译后的 core 主源码（与 APK 同一份）** + 真实网络跑用户原口令，逐次记录每条取页的 URL / Cookie / UA / HTTP 状态 / 返回体特征，并输出最终 `ParsedMedia` 到 `/workspace/MotionSaver-端到端验证.txt`（另有手机可读的 HTML 对照报告）。
+
+| 用例 | 请求次数 | 关键响应 | 结果 |
+| --- | --- | --- | --- |
+| 用户链接 `dBhPfcEmyLc` | 7 | 第 3、4 次带访客 Cookie 命中 `videoInfoRes` + `item_list`，但 `images`/`url_list` 均不存在，`filter_reason=status_audit_not_pass` | **0 个资源** |
+| 对照「沙龙月季」`vaYOcAwFVf4` | 2 | 第 2 次命中 `images=3`、`url_list` | **3 张 1080×1440 原图 + 原声** |
+
+同一份代码、同一网络、同一时刻：B 能出图、A 不能 → 确认是平台未开放该作品媒体，不是 App 解析链路故障。另实测 6 种 URL / UA 组合（完整分享参数、iPhone UA、m.douyin.com、www.douyin.com 等）全部返回同一个 `status_audit_not_pass`。
+
+同时修掉一个真 bug：结果页 `AppUi` 里写死的一条红字「本次未拿到媒体地址：平台返回了未渲染的页面壳…」与下方准确的平台状态提示自相矛盾（用户截图可见）。v2.8.2 起空结果原因**只由解析层 warnings 给出**，dex 中「未渲染的页面壳」「本次未拿到媒体地址」均已清零；爬虫 UA 重试也补上访客 Cookie，避免被重定向到 `www.douyin.com/note` 的 404 空壳。
+
+127 项 JVM 单测全绿（含真实网络端到端），产物 SHA-256 `8cc96ab811ddca663c04121cb71274427419bf2841318f93c124f8086dd27a35`，签名 `ed2cd24a…` 不变，可直接覆盖安装。
+
+---
+
 ## 2.8.1 更新：回退解析版（最新产物）
 
 用户反馈同一条抖音图文链接「依旧不行、回到前两个版本那种」。实测定位如下：
@@ -21,7 +39,7 @@
 3. 平台明确给出 `filter_reason` 时（`status_audit_not_pass` / 私密 / 已删除 / 风控），结果页**如实显示平台状态**并说明「与 App 版本无关，换一个已公开作品即可」，不再误报成「未渲染页面壳 / 解析失败」。
 4. 新增 `FallbackParsingTest`（4 个用例，用 11/07 真实抓取的审核页与正常页做 fixture），126 项 JVM 单测全绿。
 
-产物：`MotionSaver-2.8.1-release.apk`，versionCode 12 / 2.8.1，1,911,428 B，SHA-256 `ecebe15f1af22780d668ffef0f76825da03d635d8e05b98d6d4afadebd8c4f87`，签名 `ed2cd24a…` 与 v2.6.0～v2.8.0 一致，可直接覆盖安装。
+产物：`MotionSaver-2.8.1-release.apk`，versionCode 12 / 2.8.1，1,911,428 B，SHA-256 `8cc96ab811ddca663c04121cb71274427419bf2841318f93c124f8086dd27a35`，签名 `ed2cd24a…` 与 v2.6.0～v2.8.0 一致，可直接覆盖安装。
 
 ---
 
@@ -113,7 +131,7 @@
 | **2.6 收敛** | 上面「本地合成 GIF」能力现在**只对 ≥2 张静态帧的多图作品提供**：单张静态图没有第二帧，作品本身也不含动态片段，旧版对它生成动图属于假识别。UI 分组改名为「轮播动图（合成）」，【动态图】误导标签改为【实况图】，单图作品明确提示「不含动图」 |
 | **验证** | 108 项 JVM 单测全绿（0 失败 / 0 错误）；真实「沙龙月季」3 帧原图合成的 GIF 经 Pillow 严格逐帧解码通过（3 帧 / 3.6 s / 循环 0 / 三帧互不相同）；真机样本 `MVIMG_20261106_230518.jpg` 由**实际编译产物**解析出 `videoOffset=2993063 / videoLength=2990126 / 时间戳 910229`，与 Python 二进制实测一致 |
 
-> 最终安装包：`MotionSaver-2.8.1-release.apk`（versionCode 12 / versionName 2.8.1，沿用 debug keystore 签名，可直接覆盖安装旧版），**1,911,428 B ≈ 1.82 MiB**，SHA-256 `ecebe15f1af22780d668ffef0f76825da03d635d8e05b98d6d4afadebd8c4f87`，详见下方「交付」。APK 只走直链分发，不上传 GitHub。
+> 最终安装包：`MotionSaver-2.8.2-release.apk`（versionCode 13 / versionName 2.8.2，沿用 debug keystore 签名，可直接覆盖安装旧版），**1,911,428 B ≈ 1.82 MiB**，SHA-256 `8cc96ab811ddca663c04121cb71274427419bf2841318f93c124f8086dd27a35`，详见下方「交付」。APK 只走直链分发，不上传 GitHub。
 
 > 关于「60Hz」：Android 没有强制设置刷新率的公开 API（刷新率由系统与厂商显示策略管理），本版做的是向系统**请求**设备支持的最高刷新率档位，并消除掉帧来源（JIT、全量重组、大图解码 GC）。系统不允许时会静默回退，不影响功能。
 
@@ -153,16 +171,16 @@ python3 verify/verify_v22.py         # 真实网络端到端：两条链接 + �
 **安装包不走 GitHub**：手机浏览器打开工作台上传页，点顶部「下载并安装 APK」（即 `/apk` 直链）即可下载安装（需允许「未知来源」）。直链带访问凭据 `?sharecode=...`，完整入口在交付消息中给出，不写进公开仓库。
 minSdk 26 / targetSdk 35 / arm64-v8a / debug 签名。
 
-### 交付（v2.8.1 最终产物）
+### 交付（v2.8.2 最终产物）
 
 | 项 | 值 |
 | --- | --- |
-| 文件 | `MotionSaver-2.8.1-release.apk` |
-| 版本 | versionCode 12 / versionName 2.8.1 |
+| 文件 | `MotionSaver-2.8.2-release.apk` |
+| 版本 | versionCode 13 / versionName 2.8.2 |
 | 体积 | 1,911,428 B（1.82 MiB / 1.911 MB），**< 10 MB** |
-| SHA-256 | `ecebe15f1af22780d668ffef0f76825da03d635d8e05b98d6d4afadebd8c4f87` |
+| SHA-256 | `8cc96ab811ddca663c04121cb71274427419bf2841318f93c124f8086dd27a35` |
 | 签名 | `CN=Android Debug`，证书 SHA-256 `ed2cd24a6da533c8a9d4541dc83ab96936e51072e0298f0b6b601356c3f32d9d`，与 v2.6.0～v2.8.0 一致，可直接覆盖安装 |
-| 校验 | `aapt dump badging` 确认包名 `com.motionsaver.app` / versionCode 12 / 2.8.1；`apksigner verify` 通过；dex 内含「2.8.1」「回退解析版」「与 App 版本无关」 |
+| 校验 | `aapt dump badging` 确认包名 `com.motionsaver.app` / versionCode 13 / 2.8.2；`apksigner verify` 通过；dex 内含「2.8.2」「端到端验证版」，旧「未渲染的页面壳 / 本次未拿到媒体地址」已彻底消失 |
 | 下载 | 工作台 `/apk` 直链（带 sharecode，见交付消息），**不上传 GitHub** |
 
 **在手机上**：把链接或 2~3 条整段口令一起粘贴 → 点「① 解析」→ 每个作品一张卡，缩略图右上角圆圈选中（选中会浮起放大）→ 点图直接预览 → 卡右上角方框一键全选 → 需要时打开「提取音频」→ 点「② 下载选中」。
