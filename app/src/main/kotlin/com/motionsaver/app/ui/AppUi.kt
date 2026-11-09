@@ -16,6 +16,12 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.DateRange
+import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.List
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -54,7 +60,6 @@ import java.util.*
 
 private val Scrim = Color(0x66000000)
 private val TAB_LABELS = listOf("解析", "队列", "记录", "设置")
-private val TAB_ICONS = listOf("↓", "≡", "◷", "⚙")
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -88,29 +93,8 @@ fun AppRoot(
         Scaffold(
             containerColor = Color.Transparent,
             contentColor = Glass.onGlass(dark),
-            topBar = {
-                TopAppBar(
-                    title = {
-                        Column {
-                            Text(
-                                "动态存",
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 22.sp,
-                                color = Glass.onGlass(dark)
-                            )
-                            Text(
-                                "MotionSaver · 图文 / 视频 / 音频 / 动图",
-                                fontSize = 11.sp,
-                                color = Glass.onGlassSub(dark)
-                            )
-                        }
-                    },
-                    colors = TopAppBarDefaults.topAppBarColors(
-                        containerColor = Color.Transparent,
-                        titleContentColor = Glass.onGlass(dark)
-                    )
-                )
-            },
+            // 只留状态栏占位：Miuix 大标题在各页面内容区里，随内容一起滚动。
+            topBar = { Spacer(Modifier.statusBarsPadding().height(6.dp)) },
             bottomBar = { GlassNavBar(dark, tab) { tab = it } }
         ) { padding ->
             Box(Modifier.padding(padding).fillMaxSize()) {
@@ -125,60 +109,205 @@ fun AppRoot(
     }
 }
 
-/** MIUI 实色底栏：白色实色圆角卡片，选中项为 HyperOS 蓝胶囊。 */
+/** Miuix 平铺底栏：浅灰底 + 线性图标 + 小字，选中项变深色，无悬浮胶囊、无阴影。 */
 @Composable
 private fun GlassNavBar(dark: Boolean, tab: Int, onSelect: (Int) -> Unit) {
-    Box(
-        Modifier
-            .fillMaxWidth()
-            .navigationBarsPadding()
-            .padding(start = 16.dp, end = 16.dp, top = 10.dp, bottom = 24.dp)
+    val icons: List<ImageVector> = listOf(
+        Icons.Filled.Home, Icons.Filled.List, Icons.Filled.DateRange, Icons.Filled.Settings
+    )
+    Column(
+        Modifier.fillMaxWidth().background(Glass.pageColor(dark)).navigationBarsPadding()
     ) {
-        Row(
-            Modifier
-                .fillMaxWidth()
-                .shadow(10.dp, Glass.PillShape, clip = false, ambientColor = Color(0x12000000))
-                .edgeGlass(
-                    dark,
-                    shape = Glass.PillShape,
-                    centerTint = if (dark) Color.White.copy(alpha = 0.04f)
-                    else Color.White.copy(alpha = 0.07f)
-                )
-                .padding(horizontal = 8.dp, vertical = 8.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
+        HorizontalDivider(
+            thickness = 0.5.dp,
+            color = if (dark) Color(0xFF2A2D33) else Color(0xFFECECEC)
+        )
+        Row(Modifier.fillMaxWidth().padding(top = 9.dp, bottom = 8.dp)) {
             TAB_LABELS.forEachIndexed { i, label ->
                 val selected = tab == i
-                Row(
+                Column(
                     Modifier
                         .weight(1f)
-                        .clip(Glass.PillShape)
-                        .background(
-                            if (selected) Glass.accentBrush else Brush.linearGradient(
-                                listOf(Color.Transparent, Color.Transparent)
-                            ),
-                            Glass.PillShape
-                        )
+                        .clip(RoundedCornerShape(12.dp))
                         .clickable { onSelect(i) }
-                        .padding(vertical = 9.dp),
-                    horizontalArrangement = Arrangement.Center,
-                    verticalAlignment = Alignment.CenterVertically
+                        .padding(vertical = 3.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    Text(
-                        TAB_ICONS[i],
-                        color = if (selected) Color.White else Glass.onGlassSub(dark),
-                        fontSize = 14.sp
+                    Icon(
+                        icons[i], contentDescription = label,
+                        tint = if (selected) Glass.onGlass(dark) else Glass.onGlassSub(dark),
+                        modifier = Modifier.size(23.dp)
                     )
-                    Spacer(Modifier.width(5.dp))
+                    Spacer(Modifier.height(3.dp))
                     Text(
                         label,
-                        color = if (selected) Color.White else Glass.onGlassSub(dark),
-                        fontSize = 12.sp,
-                        fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal
+                        color = if (selected) Glass.onGlass(dark) else Glass.onGlassSub(dark),
+                        fontSize = 11.sp,
+                        fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal
                     )
                 }
             }
+        }
+    }
+}
+
+// ------------------------------------------------------------------ Miuix 通用组件
+
+/** 大标题 + 副标题：对齐 LSPosed 概览 / 设置页，随内容一起滚动。 */
+@Composable
+fun MiuixPageTitle(title: String, sub: String, onBack: (() -> Unit)? = null) {
+    val dark = isSystemInDarkTheme()
+    Column(Modifier.fillMaxWidth()) {
+        if (onBack != null) {
+            TextButton(onClick = onBack, modifier = Modifier.offset(x = (-12).dp)) {
+                Text("< 返回", color = Glass.Accent, fontSize = 14.sp)
+            }
+        } else {
+            Spacer(Modifier.height(20.dp))
+        }
+        Text(title, fontSize = 30.sp, fontWeight = FontWeight.Bold,
+            color = Glass.onGlass(dark), letterSpacing = (-0.4).sp)
+        if (sub.isNotBlank()) {
+            Spacer(Modifier.height(2.dp))
+            Text(sub, fontSize = 13.sp, color = Glass.onGlassSub(dark))
+        }
+        Spacer(Modifier.height(18.dp))
+    }
+}
+
+/** SmallTitle：蓝色分组小标题，放在卡片上方。 */
+@Composable
+fun MiuixSmallTitle(text: String) {
+    Text(text, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
+        color = Glass.groupTitle(isSystemInDarkTheme()),
+        modifier = Modifier.padding(top = 16.dp, bottom = 9.dp))
+}
+
+/** 纯白大圆角卡片：零阴影、零描边，内部不插分隔线。 */
+@Composable
+fun MiuixCard(content: @Composable ColumnScope.() -> Unit) {
+    val dark = isSystemInDarkTheme()
+    Column(
+        Modifier.fillMaxWidth()
+            .clip(Glass.CardShape)
+            .background(Glass.cardColor(dark), Glass.CardShape)
+            .padding(vertical = 6.dp),
+        content = content
+    )
+}
+
+/** 纯文字行 + 右箭头。 */
+@Composable
+fun MiuixArrowRow(title: String, summary: String = "", onClick: () -> Unit) {
+    val dark = isSystemInDarkTheme()
+    Row(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 18.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(title, fontSize = 16.sp, color = Glass.onGlass(dark))
+            if (summary.isNotBlank()) {
+                Spacer(Modifier.height(3.dp))
+                Text(summary, fontSize = 12.5.sp, color = Glass.onGlassSub(dark))
+            }
+        }
+        Spacer(Modifier.width(10.dp))
+        Text("›", fontSize = 22.sp, color = Color(0xFFB8B8BD))
+    }
+}
+
+/** 纯文字行 + Miuix 胶囊开关。 */
+@Composable
+fun MiuixSwitchRow(
+    title: String, summary: String = "",
+    checked: Boolean, onChange: (Boolean) -> Unit
+) {
+    val dark = isSystemInDarkTheme()
+    Row(
+        Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(title, fontSize = 16.sp, color = Glass.onGlass(dark))
+            if (summary.isNotBlank()) {
+                Spacer(Modifier.height(3.dp))
+                Text(summary, fontSize = 12.5.sp, color = Glass.onGlassSub(dark))
+            }
+        }
+        Spacer(Modifier.width(10.dp))
+        Switch(
+            checked = checked, onCheckedChange = onChange,
+            colors = SwitchDefaults.colors(
+                checkedThumbColor = Color.White,
+                checkedTrackColor = Glass.Accent,
+                uncheckedThumbColor = Color.White,
+                uncheckedTrackColor = Glass.SwitchOff
+            )
+        )
+    }
+}
+
+/** 带 +/- 的数值行（并发数）。 */
+@Composable
+fun MiuixStepperRow(title: String, summary: String, value: Int, onChange: (Int) -> Unit) {
+    val dark = isSystemInDarkTheme()
+    Row(
+        Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(title, fontSize = 16.sp, color = Glass.onGlass(dark))
+            if (summary.isNotBlank()) {
+                Spacer(Modifier.height(3.dp))
+                Text(summary, fontSize = 12.5.sp, color = Glass.onGlassSub(dark))
+            }
+        }
+        TextButton(onClick = { onChange((value - 1).coerceIn(1, 8)) }) {
+            Text("−", fontSize = 18.sp, color = Glass.Accent)
+        }
+        Text("$value", fontSize = 16.sp, fontWeight = FontWeight.SemiBold,
+            color = Glass.onGlass(dark))
+        TextButton(onClick = { onChange((value + 1).coerceIn(1, 8)) }) {
+            Text("+", fontSize = 18.sp, color = Glass.Accent)
+        }
+    }
+}
+
+/** Miuix TextField：浅灰无边框圆角块。 */
+@Composable
+fun MiuixField(label: String, value: String, onChange: (String) -> Unit) {
+    val dark = isSystemInDarkTheme()
+    Row(
+        Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 7.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(label, fontSize = 13.sp, color = Glass.onGlassSub(dark),
+            modifier = Modifier.width(96.dp))
+        BasicTextField(
+            value = value,
+            onValueChange = onChange,
+            modifier = Modifier.weight(1f)
+                .clip(RoundedCornerShape(12.dp))
+                .background(Glass.fieldColor(dark), RoundedCornerShape(12.dp))
+                .padding(horizontal = 12.dp, vertical = 10.dp),
+            textStyle = TextStyle(color = Glass.onGlass(dark), fontSize = 14.sp),
+            singleLine = true,
+            cursorBrush = SolidColor(Glass.Accent)
+        )
+    }
+}
+
+/** 纯文字信息行：主标题 + 灰色摘要，无右侧控件。 */
+@Composable
+fun MiuixInfoRow(title: String, summary: String = "") {
+    val dark = isSystemInDarkTheme()
+    Column(Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 11.dp)) {
+        Text(title, fontSize = 16.sp, color = Glass.onGlass(dark))
+        if (summary.isNotBlank()) {
+            Spacer(Modifier.height(3.dp))
+            Text(summary, fontSize = 12.5.sp, color = Glass.onGlassSub(dark))
         }
     }
 }
@@ -205,26 +334,27 @@ private fun HomeScreen(state: MainUiState, vm: MainViewModel) {
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
+        item(key = "page_title") {
+            MiuixPageTitle("动态存", "MotionSaver · 图文 / 视频 / 音频 / 动图")
+        }
         item(key = "input_header") {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Text("粘贴分享链接", style = MaterialTheme.typography.titleMedium,
-                        color = Glass.onGlass(isSystemInDarkTheme()))
-                    Text("可一次贴多条口令 · 自动用话题 / 文案命名",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = Glass.onGlassSub(isSystemInDarkTheme()))
-                }
+            Row(
+                Modifier.fillMaxWidth().padding(bottom = 2.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("粘贴分享链接", fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
+                    color = Glass.groupTitle(isSystemInDarkTheme()),
+                    modifier = Modifier.weight(1f))
                 TextButton(
                     onClick = onClearAll,
                     enabled = state.input.isNotEmpty() || state.results.isNotEmpty()
-                ) { Text("清空") }
+                ) { Text("清空", color = Glass.Accent, fontSize = 13.sp) }
             }
         }
 
         item(key = "input_field") {
             val dark = isSystemInDarkTheme()
-            // MIUI 实色输入框：整块为纯白圆角卡片（edgeGlass），边界与所有卡片一致。
-            // 不再有半透明玻璃 / 折射高光，从结构上消除「白色方框与背景不融合」。
+            // Miuix 输入框：浅灰实色圆角块，无描边、无玻璃高光，与页面自然融合。
             Box(
                 Modifier
                     .fillMaxWidth()
@@ -262,14 +392,11 @@ private fun HomeScreen(state: MainUiState, vm: MainViewModel) {
         item(key = "action_row") {
             val dark = isSystemInDarkTheme()
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                // MIUI 实色胶囊主按钮：柔和阴影 + 主题色实色填充
+                // Miuix 胶囊主按钮：HyperOS 蓝实色填充，零阴影
                 Box(
                     Modifier
                         .weight(1f)
                         .height(50.dp)
-                        .shadow(14.dp, Glass.PillShape, clip = false,
-                            ambientColor = Glass.Accent.copy(alpha = 0.35f),
-                            spotColor = Glass.Accent.copy(alpha = 0.35f))
                         .liquidButton(Glass.accentBrush, Glass.PillShape)
                         .clickable(enabled = !state.isAnalyzing && !state.isDownloading) { onAnalyze() },
                     contentAlignment = Alignment.Center
@@ -281,7 +408,6 @@ private fun HomeScreen(state: MainUiState, vm: MainViewModel) {
                     Modifier
                         .weight(1f)
                         .height(50.dp)
-                        .shadow(10.dp, Glass.PillShape, clip = false, ambientColor = Color(0x14000000))
                         .liquidButton(Glass.accentBrushMint, Glass.PillShape)
                         .clickable(enabled = state.results.isNotEmpty() && !state.isDownloading) { onDownload() },
                     contentAlignment = Alignment.Center
@@ -333,7 +459,7 @@ private fun HomeScreen(state: MainUiState, vm: MainViewModel) {
 
         item(key = "footer") {
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                HorizontalDivider(Modifier.padding(vertical = 6.dp))
+                Spacer(Modifier.height(6.dp))
                 Text("支持：${vm.supportedPlatforms}", style = MaterialTheme.typography.bodySmall)
                 Text(
                     "点缩略图直接预览；轮播动图点开就播放、播完自动暂停；右上角圆圈点一下选中、再点取消。" +
@@ -389,8 +515,6 @@ private fun ResultCard(
         dark = dark,
         modifier = Modifier
             .fillMaxWidth()
-            .shadow(12.dp, Glass.CardShape, clip = false, ambientColor = Color(0x14000000))
-            .padding(1.dp)
     ) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             // 标题行 + 右上角全选方框 + 清空
@@ -503,8 +627,6 @@ private fun RowScope.ResourceTile(
                 scaleX = if (selected) 1.04f else 1f
                 scaleY = if (selected) 1.04f else 1f
             }
-            .shadow(if (selected) 14.dp else 6.dp, Glass.TileShape, clip = false,
-                ambientColor = if (selected) Glass.Accent.copy(alpha = 0.3f) else Color(0x14000000))
             .glassSurface(dark, selected, Glass.TileShape)
             .clip(Glass.TileShape)
             .clickable(onClick = onPreview)
@@ -695,15 +817,19 @@ private fun openSaved(ctx: Context, e: HistoryEntry) {
 
 @Composable
 private fun QueueScreen(state: MainUiState) {
-    if (state.queue.isEmpty()) {
-        EmptyHint("还没有下载任务。先到「解析下载」解析并勾选资源。")
-        return
-    }
-    LazyColumn(
-        Modifier.fillMaxSize().padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-        items(state.queue, key = { it.id }) { q -> QueueCard(q) }
+    Column(Modifier.fillMaxSize()) {
+        MiuixPageTitle("队列", "下载任务 · 按需勾选，串行不卡顿")
+        if (state.queue.isEmpty()) {
+            EmptyHint("还没有下载任务。先到「解析下载」解析并勾选资源。")
+        } else {
+            MiuixSmallTitle("任务列表")
+            LazyColumn(
+                Modifier.fillMaxSize().padding(horizontal = 16.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                items(state.queue, key = { it.id }) { q -> QueueCard(q) }
+            }
+        }
     }
 }
 
@@ -745,6 +871,7 @@ private fun HistoryScreen(state: MainUiState, vm: MainViewModel) {
     // 动态照片走 App 内无损播放（读 XMP 定位尾部 MP4），其余仍交给系统相册
     var motionPreview by remember { mutableStateOf<Uri?>(null) }
     Column(Modifier.fillMaxSize()) {
+        MiuixPageTitle("记录", "已保存到相册 / 音乐 · 点开可直接预览")
         Row(
             Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
             horizontalArrangement = Arrangement.End,
@@ -819,7 +946,7 @@ private fun EmptyHint(text: String) {
 
 // ------------------------------------------------------------------ 设置
 
-/** 主设置页保持极简，全部细节收进「高级设置」二级页。 */
+/** 设置页：Miuix SmallTitle + Card 分组列表（对齐 LSPosed 设置页真机截图）。 */
 @Composable
 private fun SettingsScreen(state: MainUiState, vm: MainViewModel) {
     var advanced by remember { mutableStateOf(false) }
@@ -832,53 +959,60 @@ private fun SettingsScreen(state: MainUiState, vm: MainViewModel) {
         NamingSettingsScreen(state, vm) { naming = false }
         return
     }
-    val dark = isSystemInDarkTheme()
     Column(
-        Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState())
+            .padding(horizontal = 16.dp)
     ) {
-        Text("设置", style = MaterialTheme.typography.titleLarge, color = Glass.onGlass(dark))
-        GlassBox(dark, modifier = Modifier.fillMaxWidth().padding(1.dp), shape = Glass.TileShape) {
-            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text("MotionSaver 2.8.2 · 端到端验证版", fontWeight = FontWeight.Bold,
-                    color = Glass.onGlass(dark))
-                Text(
-                    "粘贴链接 → 解析 → 点缩略图预览 → 圆圈选中 → 下载。" +
-                        "解析结果页可直接切换「提取音频」与全选。\n" +
-                        "解析已回到前两个版本的取数方式：短链归一到 /share/note/{id}/，" +
-                        "用公开访客 Cookie 直取 _ROUTER_DATA，并保留完整参数地址重试。" +
-                        "平台明确返回「审核未通过/暂不公开」时会如实提示，不再误报成解析失败；" +
-                        "空结果的原因统一由解析层给出，界面不再出现互相矛盾的旧提示。\n" +
-                        "MIUI / HyperOS 实色风格：纯浅灰底 + 白色实色圆角卡片 + HyperOS 蓝，" +
-                        "无玻璃无光晕、层次干净；命名方案可自由组合。单图作品不再误报动图。" +
-                        "release：R8 全量优化 + Baseline Profile AOT。",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = Glass.onGlassSub(dark)
-                )
+        MiuixPageTitle("设置", "2.9.0 (14) · Miuix 界面风格")
+
+        // 浅绿状态卡：对齐 LSPosed 概览页「已激活」卡
+        Box(
+            Modifier.fillMaxWidth().clip(Glass.CardShape)
+                .background(Glass.GreenCard, Glass.CardShape)
+                .heightIn(min = 120.dp).padding(20.dp)
+        ) {
+            Column(Modifier.align(Alignment.CenterStart)) {
+                Text("已就绪", fontSize = 19.sp, fontWeight = FontWeight.Bold,
+                    color = Color(0xFF1A3A24))
+                Spacer(Modifier.height(3.dp))
+                Text("2.9.0 (14)", fontSize = 13.sp, color = Color(0xFF4A6B55))
+                Spacer(Modifier.height(18.dp))
+                Text("Miuix 界面风格", fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
+                    color = Color(0xFF1A3A24))
+            }
+            Box(
+                Modifier.align(Alignment.CenterEnd).size(76.dp).clip(CircleShape)
+                    .border(7.dp, Glass.GreenLine, CircleShape),
+                contentAlignment = Alignment.Center
+            ) {
+                Text("✓", fontSize = 34.sp, fontWeight = FontWeight.Bold,
+                    color = Glass.GreenLine)
             }
         }
-        Button(onClick = { naming = true }, Modifier.fillMaxWidth()) {
-            Text("命名方案 →  自由组合日期 / 作者 / 序号 / 标题")
+
+        MiuixSmallTitle("解析与保存")
+        MiuixCard {
+            MiuixArrowRow("命名方案", "自由组合日期 / 作者 / 序号 / 标题") { naming = true }
+            MiuixArrowRow("高级设置", "解析端点 / 字段映射 / 保存行为") { advanced = true }
         }
-        Button(onClick = { advanced = true }, Modifier.fillMaxWidth()) {
-            Text("高级设置 →")
+
+        MiuixSmallTitle("数据")
+        MiuixCard {
+            MiuixArrowRow("清空下载记录", "仅清除记录，不删除已保存文件") { vm.clearHistory() }
         }
-        Text(
-            "命名方案里可排列组合日期、时间、序号、标题、作者、平台、作品 ID、短码等字段并实时预览；" +
-                "端点配置、字段映射、并发数、保存行为、动态照片自检等收在高级设置里。",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-        HorizontalDivider(Modifier.padding(vertical = 6.dp))
-        OutlinedButton(onClick = vm::clearHistory, Modifier.fillMaxWidth()) {
-            Text("清空下载记录")
+
+        MiuixSmallTitle("关于")
+        MiuixCard {
+            MiuixInfoRow("版本", "2.9.0 (14) · Miuix 风格版")
+            MiuixInfoRow("解析方式", "公开页访客渲染数据 / JSON-LD / og:* 三层兜底；不构造私有签名、不绕过鉴权")
+            MiuixInfoRow("画质", "自动选最高质量 JPEG 候选，多 CDN 直链自动回退")
+            MiuixInfoRow("性能", "R8 全量优化 + Baseline Profile AOT；Miuix 纯静态绘制、零模糊零新增依赖")
         }
+        Spacer(Modifier.height(20.dp))
     }
 }
 
+/** 高级设置：SmallTitle + Card 分组，全部字段绑定与自检逻辑保持原样。 */
 @Composable
 private fun AdvancedSettingsScreen(
     state: MainUiState,
@@ -888,91 +1022,79 @@ private fun AdvancedSettingsScreen(
     var draft by remember(state.settings) { mutableStateOf(state.settings) }
 
     Column(
-        Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp)
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState())
+            .padding(horizontal = 16.dp)
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            TextButton(onClick = onBack) { Text("← 返回") }
-            Text("高级设置", style = MaterialTheme.typography.titleMedium)
-        }
+        MiuixPageTitle("高级设置", "解析端点、字段映射与保存行为", onBack = onBack)
 
-        Text("解析端点（可选）", style = MaterialTheme.typography.titleMedium)
+        MiuixSmallTitle("网络")
+        MiuixCard {
+            MiuixSwitchRow("启用自填端点", "填入你自己的合规数据源", draft.endpointEnabled) {
+                draft = draft.copy(endpointEnabled = it)
+            }
+            MiuixField("URL 模板", draft.endpointUrl) { draft = draft.copy(endpointUrl = it) }
+            MiuixField("请求头", draft.endpointHeaders) { draft = draft.copy(endpointHeaders = it) }
+        }
         Text(
             "公开分享页通常不声明视频/音频直链。填入你自己的合规数据源（自建服务 / yt-dlp 自托管 / 已授权 API），即可一次性拿到四类完整资源。App 不预置任何第三方私有接口。",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
+            fontSize = 12.sp, color = Glass.onGlassSub(isSystemInDarkTheme()),
+            modifier = Modifier.padding(horizontal = 4.dp, vertical = 8.dp)
         )
 
-        SettingsSwitch("启用自填端点", draft.endpointEnabled) {
-            draft = draft.copy(endpointEnabled = it)
-        }
-        LabeledField("URL 模板（必须含 {url}）", draft.endpointUrl,
-            "https://your.host/parse?url={url}") { draft = draft.copy(endpointUrl = it) }
-        LabeledField("请求头（每行一个，可留空）", draft.endpointHeaders,
-            "Authorization: Bearer xxx", singleLine = false) {
-            draft = draft.copy(endpointHeaders = it)
-        }
-
-        Text("JSON 字段映射", style = MaterialTheme.typography.titleSmall)
-        LabeledField("图文数组", draft.fieldImages, "images") { draft = draft.copy(fieldImages = it) }
-        LabeledField("视频数组", draft.fieldVideos, "videos") { draft = draft.copy(fieldVideos = it) }
-        LabeledField("音频数组", draft.fieldAudios, "audios") { draft = draft.copy(fieldAudios = it) }
-        LabeledField("动图数组", draft.fieldAnimated, "animated") { draft = draft.copy(fieldAnimated = it) }
-        LabeledField("实况封面字段", draft.fieldCover, "cover") { draft = draft.copy(fieldCover = it) }
-        LabeledField("实况视频字段", draft.fieldLiveVideo, "live_video") {
-            draft = draft.copy(fieldLiveVideo = it)
+        MiuixSmallTitle("JSON 字段映射")
+        MiuixCard {
+            MiuixField("图文数组", draft.fieldImages) { draft = draft.copy(fieldImages = it) }
+            MiuixField("视频数组", draft.fieldVideos) { draft = draft.copy(fieldVideos = it) }
+            MiuixField("音频数组", draft.fieldAudios) { draft = draft.copy(fieldAudios = it) }
+            MiuixField("动图数组", draft.fieldAnimated) { draft = draft.copy(fieldAnimated = it) }
+            MiuixField("实况封面", draft.fieldCover) { draft = draft.copy(fieldCover = it) }
+            MiuixField("实况视频", draft.fieldLiveVideo) { draft = draft.copy(fieldLiveVideo = it) }
         }
 
-        HorizontalDivider(Modifier.padding(vertical = 6.dp))
-        Text("保存行为", style = MaterialTheme.typography.titleMedium)
-        SettingsSwitch("实况图合成小米动态照片", draft.motionPhotoEnabled) {
-            draft = draft.copy(motionPhotoEnabled = it)
-        }
-        SettingsSwitch("图文笔记同时保存正文 .txt", draft.saveCaption) {
-            draft = draft.copy(saveCaption = it)
-        }
-        SettingsSwitch("解析结果页默认勾选提取音频", draft.extractAudioFromVideo) {
-            draft = draft.copy(extractAudioFromVideo = it)
-        }
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("并发数：${draft.concurrency}", Modifier.weight(1f))
-            OutlinedButton(onClick = {
-                draft = draft.copy(concurrency = (draft.concurrency - 1).coerceIn(1, 8))
-            }) { Text("−") }
-            Spacer(Modifier.width(8.dp))
-            OutlinedButton(onClick = {
-                draft = draft.copy(concurrency = (draft.concurrency + 1).coerceIn(1, 8))
-            }) { Text("+") }
-        }
-        Button(onClick = { vm.updateSettings(draft) }, Modifier.fillMaxWidth()) {
-            Text("保存设置")
-        }
-
-        HorizontalDivider(Modifier.padding(vertical = 6.dp))
-        Text("动态照片自检", style = MaterialTheme.typography.titleMedium)
-        Text("用内置素材合成一份动态照片并逐项校验 XMP 与尾部 MP4，无需联网。",
-            style = MaterialTheme.typography.bodySmall)
-        OutlinedButton(onClick = vm::selfCheck, Modifier.fillMaxWidth()) { Text("运行自检") }
-        if (state.selfCheck.isNotBlank()) {
-            val dark = isSystemInDarkTheme()
-            GlassBox(dark, modifier = Modifier.fillMaxWidth().padding(1.dp), shape = Glass.TileShape) {
-                Text(state.selfCheck, Modifier.padding(14.dp),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = Glass.onGlass(dark))
+        MiuixSmallTitle("保存行为")
+        MiuixCard {
+            MiuixSwitchRow("实况图合成小米动态照片",
+                "JPEG + 尾部 MP4 单文件，相册可直接查看", draft.motionPhotoEnabled) {
+                draft = draft.copy(motionPhotoEnabled = it)
+            }
+            MiuixSwitchRow("图文笔记同时保存正文 .txt",
+                "把文案一起写入相册目录", draft.saveCaption) {
+                draft = draft.copy(saveCaption = it)
+            }
+            MiuixSwitchRow("默认勾选提取音频",
+                "解析结果页的初始状态", draft.extractAudioFromVideo) {
+                draft = draft.copy(extractAudioFromVideo = it)
+            }
+            MiuixStepperRow("并发数", "同时下载的资源数量", draft.concurrency) {
+                draft = draft.copy(concurrency = it)
             }
         }
 
-        HorizontalDivider(Modifier.padding(vertical = 6.dp))
-        Text("关于", style = MaterialTheme.typography.titleMedium)
-        InfoRow("解析方式", "公开页访客渲染数据 / JSON-LD / og:* 三层兜底；不构造私有签名、不绕过鉴权")
-        InfoRow("画质", "图集自动选最高质量 JPEG 候选，排除水印与缩放模板；多 CDN 直链自动回退")
-        InfoRow("动态照片", "JPEG + 尾部 MP4 + XMP 偏移元数据，字节级无损拼接")
-        InfoRow("架构", "core 纯 JVM 核心库（单测全绿）+ app Compose 层；arm64-v8a；minSdk 26")
-        InfoRow("性能", "release + R8 全量优化 + Baseline Profile AOT；请求设备高刷新率；MIUI 实色卡片为纯静态绘制、零玻璃零模糊、零新增依赖")
-        Spacer(Modifier.height(8.dp))
+        MiuixSmallTitle("框架")
+        MiuixCard {
+            MiuixArrowRow("运行动态照片自检", "校验 XMP 与尾部 MP4，无需联网") { vm.selfCheck() }
+            if (state.selfCheck.isNotBlank()) {
+                MiuixInfoRow("自检结果", state.selfCheck)
+            }
+        }
+
+        MiuixSmallTitle("关于")
+        MiuixCard {
+            MiuixInfoRow("解析方式", "公开页访客渲染数据 / JSON-LD / og:* 三层兜底；不构造私有签名、不绕过鉴权")
+            MiuixInfoRow("画质", "图集自动选最高质量 JPEG 候选，排除水印与缩放模板；多 CDN 直链自动回退")
+            MiuixInfoRow("动态照片", "JPEG + 尾部 MP4 + XMP 偏移元数据，字节级无损拼接")
+            MiuixInfoRow("架构", "core 纯 JVM 核心库（单测全绿）+ app Compose 层；arm64-v8a；minSdk 26")
+            MiuixInfoRow("性能", "release + R8 全量优化 + Baseline Profile AOT；Miuix 纯静态绘制、零模糊零新增依赖")
+        }
+
+        Spacer(Modifier.height(14.dp))
+        Button(
+            onClick = { vm.updateSettings(draft) },
+            modifier = Modifier.fillMaxWidth().height(50.dp),
+            shape = Glass.PillShape,
+            colors = ButtonDefaults.buttonColors(containerColor = Glass.Accent)
+        ) { Text("保存设置", color = Color.White, fontWeight = FontWeight.SemiBold) }
+        Spacer(Modifier.height(20.dp))
     }
 }
 

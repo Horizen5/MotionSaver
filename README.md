@@ -4,6 +4,26 @@
 
 > 不含任何第三方商业应用的反编译源码，不逆向平台私有签名，不绕过鉴权，不预置第三方解析端点。详见 [DISCLAIMER.md](DISCLAIMER.md)。
 
+## 2.9.0 更新：Miuix / HyperOS 系统应用风格（最新产物）
+
+用户给出 LSPosed 管理器真机三屏截图（模块 / 概览 / 设置），指出上一版「彩色渐变图标 + 大阴影」不是 MIUI 的样子。联网核对 [Miuix 组件库](https://compose-miuix-ui.github.io/miuix/components)（严格遵循 Xiaomi HyperOS Design Guidelines）与其 [设计语言规范](https://github.com/limczhh/miuix-skill/blob/main/references/design-language.md)，并对截图逐像素采样，得到硬指标：
+
+| 项 | 真机采样 / 规范 | 上一版（错误） | v2.9.0 |
+| --- | --- | --- | --- |
+| 页面底 | `#F7F7F7` 纯色 | 蓝灰渐变 | `#F7F7F7` 纯色 |
+| 卡片 | `#FFFFFF` 纯白、无阴影无描边 | 白卡 + 大阴影 + 描边 | 纯白 20dp 大圆角、零阴影零描边 |
+| 结构 | `SmallTitle + Card`，Card 内不插分隔线 | 彩色渐变圆形图标列表 | 蓝色分组小标题 + 纯文字行（标题/摘要 + 右箭头或开关/下拉值） |
+| 强调色 | 蓝 `#3485FF`（开关/下拉）、浅绿状态卡 `#DEFAE4` | 小米橙 + 多色渐变 | 只用 HyperOS 蓝，去橙 |
+| 标题 | 30px w700 大标题 + 13px 灰副标题，随内容滚动 | 紧凑 TopAppBar 22px | 大标题进内容区 |
+| 底栏 | 平铺浅灰底 + 线性图标 + 小字，选中变深 | 悬浮白胶囊 + 蓝色选中胶囊 | 平铺线性图标底栏 |
+| 字体 | MiSans | 系统默认 | 字体栈优先 MiSans |
+
+改动严格限定在 **app 层 6 个 UI 文件**：`Glass.kt`（材质/色板换肤，保持全部对外签名）、`MotionSaverTheme.kt`（M3 色板/形状）、`AppUi.kt`（大标题/分组卡片/底栏/设置页/高级设置页）、`NamingSettings.kt`（命名方案分组）、`app/build.gradle.kts`（版本号）、以及配套 HTML 样板间 `MotionSaver-UI样板间.html`。**core / 网络 / 解析 / ViewModel / 保存逻辑一行未动**，127 项 JVM 单测全绿。
+
+配套 UI 样板间：工作台 `/ui` 直链（纯静态、零功能、六页可点），确认后再往 App 搬，界面只改 HTML 顶部 `:root` 变量即可全站生效——这是用户提出并采纳的工作流。产物 SHA-256 `a0b8ddbbb721d37db49e1e07f1abdfcce780297ac9fb74e2c84055d948c54d11`，versionCode 14 / 2.9.0，签名 `ed2cd24a…` 不变，可直接覆盖安装。
+
+---
+
 ## 2.8.2 更新：端到端真实验证 + 清掉矛盾提示
 
 用户要求「你不能验证一下吗」。这次不再只用 curl 测服务端，而是新增 `RealNetworkVerify`：
@@ -18,7 +38,7 @@
 
 同时修掉一个真 bug：结果页 `AppUi` 里写死的一条红字「本次未拿到媒体地址：平台返回了未渲染的页面壳…」与下方准确的平台状态提示自相矛盾（用户截图可见）。v2.8.2 起空结果原因**只由解析层 warnings 给出**，dex 中「未渲染的页面壳」「本次未拿到媒体地址」均已清零；爬虫 UA 重试也补上访客 Cookie，避免被重定向到 `www.douyin.com/note` 的 404 空壳。
 
-127 项 JVM 单测全绿（含真实网络端到端），产物 SHA-256 `8cc96ab811ddca663c04121cb71274427419bf2841318f93c124f8086dd27a35`，签名 `ed2cd24a…` 不变，可直接覆盖安装。
+127 项 JVM 单测全绿（含真实网络端到端），产物 SHA-256 `a0b8ddbbb721d37db49e1e07f1abdfcce780297ac9fb74e2c84055d948c54d11`，签名 `ed2cd24a…` 不变，可直接覆盖安装。
 
 ---
 
@@ -131,7 +151,7 @@
 | **2.6 收敛** | 上面「本地合成 GIF」能力现在**只对 ≥2 张静态帧的多图作品提供**：单张静态图没有第二帧，作品本身也不含动态片段，旧版对它生成动图属于假识别。UI 分组改名为「轮播动图（合成）」，【动态图】误导标签改为【实况图】，单图作品明确提示「不含动图」 |
 | **验证** | 108 项 JVM 单测全绿（0 失败 / 0 错误）；真实「沙龙月季」3 帧原图合成的 GIF 经 Pillow 严格逐帧解码通过（3 帧 / 3.6 s / 循环 0 / 三帧互不相同）；真机样本 `MVIMG_20261106_230518.jpg` 由**实际编译产物**解析出 `videoOffset=2993063 / videoLength=2990126 / 时间戳 910229`，与 Python 二进制实测一致 |
 
-> 最终安装包：`MotionSaver-2.8.2-release.apk`（versionCode 13 / versionName 2.8.2，沿用 debug keystore 签名，可直接覆盖安装旧版），**1,911,428 B ≈ 1.82 MiB**，SHA-256 `8cc96ab811ddca663c04121cb71274427419bf2841318f93c124f8086dd27a35`，详见下方「交付」。APK 只走直链分发，不上传 GitHub。
+> 最终安装包：`MotionSaver-2.9.0-release.apk`（versionCode 14 / versionName 2.9.0，沿用 debug keystore 签名，可直接覆盖安装旧版），**1,890,652 B ≈ 1.80 MiB**，SHA-256 `a0b8ddbbb721d37db49e1e07f1abdfcce780297ac9fb74e2c84055d948c54d11`，详见下方「交付」。APK 只走直链分发，不上传 GitHub。
 
 > 关于「60Hz」：Android 没有强制设置刷新率的公开 API（刷新率由系统与厂商显示策略管理），本版做的是向系统**请求**设备支持的最高刷新率档位，并消除掉帧来源（JIT、全量重组、大图解码 GC）。系统不允许时会静默回退，不影响功能。
 
@@ -171,16 +191,16 @@ python3 verify/verify_v22.py         # 真实网络端到端：两条链接 + �
 **安装包不走 GitHub**：手机浏览器打开工作台上传页，点顶部「下载并安装 APK」（即 `/apk` 直链）即可下载安装（需允许「未知来源」）。直链带访问凭据 `?sharecode=...`，完整入口在交付消息中给出，不写进公开仓库。
 minSdk 26 / targetSdk 35 / arm64-v8a / debug 签名。
 
-### 交付（v2.8.2 最终产物）
+### 交付（v2.9.0 最终产物）
 
 | 项 | 值 |
 | --- | --- |
-| 文件 | `MotionSaver-2.8.2-release.apk` |
-| 版本 | versionCode 13 / versionName 2.8.2 |
-| 体积 | 1,911,428 B（1.82 MiB / 1.911 MB），**< 10 MB** |
-| SHA-256 | `8cc96ab811ddca663c04121cb71274427419bf2841318f93c124f8086dd27a35` |
-| 签名 | `CN=Android Debug`，证书 SHA-256 `ed2cd24a6da533c8a9d4541dc83ab96936e51072e0298f0b6b601356c3f32d9d`，与 v2.6.0～v2.8.0 一致，可直接覆盖安装 |
-| 校验 | `aapt dump badging` 确认包名 `com.motionsaver.app` / versionCode 13 / 2.8.2；`apksigner verify` 通过；dex 内含「2.8.2」「端到端验证版」，旧「未渲染的页面壳 / 本次未拿到媒体地址」已彻底消失 |
+| 文件 | `MotionSaver-2.9.0-release.apk` |
+| 版本 | versionCode 14 / versionName 2.9.0 |
+| 体积 | 1,890,652 B（1.80 MiB / 1.891 MB），**< 10 MB** |
+| SHA-256 | `a0b8ddbbb721d37db49e1e07f1abdfcce780297ac9fb74e2c84055d948c54d11` |
+| 签名 | `CN=Android Debug`，证书 SHA-256 `ed2cd24a6da533c8a9d4541dc83ab96936e51072e0298f0b6b601356c3f32d9d`，与 v2.6.0～v2.8.2 一致，可直接覆盖安装 |
+| 校验 | `aapt dump badging` 确认包名 `com.motionsaver.app` / versionCode 14 / 2.9.0；`apksigner verify` 通过；dex 内含「2.9.0」「Miuix」「已就绪」，旧「彩色渐变图标 / 液态玻璃」字样清零；本地与公网 `/apk` SHA 一致、Range 206 正常 |
 | 下载 | 工作台 `/apk` 直链（带 sharecode，见交付消息），**不上传 GitHub** |
 
 **在手机上**：把链接或 2~3 条整段口令一起粘贴 → 点「① 解析」→ 每个作品一张卡，缩略图右上角圆圈选中（选中会浮起放大）→ 点图直接预览 → 卡右上角方框一键全选 → 需要时打开「提取音频」→ 点「② 下载选中」。

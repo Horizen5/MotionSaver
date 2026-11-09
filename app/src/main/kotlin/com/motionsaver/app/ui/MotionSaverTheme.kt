@@ -10,10 +10,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
 /**
- * MIUI / HyperOS 实色风格主题：纯浅灰底 + 白色实色圆角卡片 + HyperOS 蓝强调色。
- * 材质实际绘制在 [Glass] 里，这里只负责 Material3 色板与形状，
- * 保证 Button / Switch / Checkbox / TextField 等系统组件自动跟随新风格，
- * 不再出现半透明玻璃与系统控件默认色叠加出的白色方块。
+ * Miuix / HyperOS 系统应用主题（对齐 LSPosed 管理器真机截图）。
+ * 材质绘制在 [Glass]，这里只负责 Material3 色板与形状，
+ * 保证 Button / Switch / Checkbox / TextField 等系统组件自动跟随，
+ * 不出现系统控件默认色与卡片叠加出的白色方块。
+ * 真机采样：background #F7F7F7、surface #FFFFFF、primary #3485FF。
  */
 private val LightColors = lightColorScheme(
     primary = Glass.Accent,
@@ -24,13 +25,13 @@ private val LightColors = lightColorScheme(
     onSecondary = Color.White,
     secondaryContainer = Color(0xFFE8F0FD),
     onSecondaryContainer = Color(0xFF123A6B),
-    tertiary = Glass.AccentMint,
+    tertiary = Glass.Accent,
     surface = Color.White,
-    surfaceVariant = Color(0xFFF0F2F6),
-    background = Color(0xFFF4F6F9),
-    onSurface = Color(0xFF1B1E26),
-    onSurfaceVariant = Color(0xFF6B7280),
-    outline = Color(0xFFD7DBE3),
+    surfaceVariant = Color(0xFFF0F0F2),
+    background = Glass.PageBg,
+    onSurface = Glass.TextMain,
+    onSurfaceVariant = Glass.TextSub,
+    outline = Color(0xFFE5E5EA),
     error = Color(0xFFE5484D),
     errorContainer = Color(0xFFFFE4E6)
 )
@@ -44,23 +45,23 @@ private val DarkColors = darkColorScheme(
     onSecondary = Color(0xFF0A2547),
     secondaryContainer = Color(0xFF1C3A60),
     onSecondaryContainer = Color(0xFFDCEBFF),
-    tertiary = Color(0xFFFF8A3D),
-    surface = Color(0xFF24272E),
+    tertiary = Color(0xFF6FA0FF),
+    surface = Glass.CardBgDark,
     surfaceVariant = Color(0xFF2E323B),
-    background = Color(0xFF15171C),
-    onSurface = Color(0xFFF1F3F7),
-    onSurfaceVariant = Color(0xFFA8AEB9),
+    background = Glass.PageBgDark,
+    onSurface = Glass.TextMainDark,
+    onSurfaceVariant = Glass.TextSubDark,
     outline = Color(0xFF3C414B),
     error = Color(0xFFFF8A8E),
     errorContainer = Color(0xFF5A2226)
 )
 
-/** MIUI 圆角哲学：卡片 18dp、磁贴 14dp、按钮胶囊。 */
+/** Miuix 大圆角哲学：卡片 20dp、磁贴 16dp、按钮胶囊。 */
 private val AppShapes = Shapes(
     extraSmall = RoundedCornerShape(8.dp),
     small = RoundedCornerShape(12.dp),
-    medium = RoundedCornerShape(18.dp),
-    large = RoundedCornerShape(22.dp),
+    medium = RoundedCornerShape(20.dp),
+    large = RoundedCornerShape(24.dp),
     extraLarge = RoundedCornerShape(28.dp)
 )
 
